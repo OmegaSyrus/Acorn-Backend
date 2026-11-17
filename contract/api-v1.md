@@ -43,6 +43,7 @@ PATCH  /v1/devices/{dev}               {name}                   owner or caregiv
 DELETE /v1/devices/{dev}                                        owner or caregiver: the tablet hears "gone"
 PUT    /v1/devices/{dev}/profiles      {profiles: [...]}        the device itself
 PUT    /v1/events/{game}/{dev}/{first_seq}-{last_seq}           the device itself
+GET    /v1/children/{child}/games/{game}/records?days=&limit=   parent: the child's play log lines
 GET    /v1/children/{child}/games/{game}/snapshots              device or parent of the family
 PUT    /v1/children/{child}/games/{game}/snapshots/{dev}        the device itself
 GET    /v1/children/{child}/games/{game}/settings               device or parent
@@ -99,6 +100,15 @@ compressed, 4 MB unpacked) or plain text.
   `unmapped_profiles`, and stay out of reports until mapped.
 - The game saves its upload position only after a `2xx`, and the play log
   never rotates away unsent lines. Guest profiles' lines are never sent.
+
+## Play records
+
+`GET /v1/children/{child}/games/{game}/records?days=30&limit=2000` (parents
+of the family only; `days` 1 to 400, `limit` 1 to 5000) answers
+`{child, game, days, lines: [...], truncated}`: the event lines of every
+profile mapped to the child now, from batches received in the window,
+newest first. A profile mapped after its lines were sent counts from then
+on. The parent web app builds its summary from these lines.
 
 ## Snapshots
 

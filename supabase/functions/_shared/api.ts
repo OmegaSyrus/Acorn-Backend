@@ -458,6 +458,63 @@ async function putEvents(req: Request, d: Deps, game: string, dev: string, first
   return json({ stored: true, lines: lines.length, children, unmapped_profiles: unmapped }, 201);
 }
 
+// ------------------------------------------------------------------ play records
+
+const MAX_RECORD_DAYS = 400;
+const MAX_RECORD_LINES = 5000;
+
+/**
+ * A parent reads one child's play log lines for one game: every line from a
+ * profile that is mapped to the child now (so lines sent before the mapping
+ * count too), newest first. Guest lines never reach the server.
+ */
+async function getRecords(req: Request, d: Deps, url: URL, childId: string, game: string): Promise<Response> {
+  const a = await childAccess(req, d, childId);
+  if (!a.parent) throw new ApiError("forbidden", "play records are for parents");
+  need(GAME.test(game), "bad game id");
+  const days = Number(url.searchParams.get("days") ?? "30");
+  need(Number.isInteger(days) && days >= 1 && days <= MAX_RECORD_DAYS, `days: 1 to ${MAX_RECORD_DAYS}`);
+  const limit = Number(url.searchParams.get("limit") ?? "2000");
+  need(Number.isInteger(limit) && limit >= 1 && limit <= MAX_RECORD_LINES, `limit: 1 to ${MAX_RECORD_LINES}`);
+  const mine = await d.sql`select p.dev, p.profile from device_profiles p join devices v on v.id = p.dev
+    where p.child_id = ${childId} and v.family_id = ${a.familyId}`;
+  const keys = new Set(mine.map((r: Row) => `${r.dev}/${r.profile}`));
+  const devs = [...new Set(mine.map((r: Row) => r.dev as string))];
+  const since = new Date(d.now() - days * 86400 * 1000);
+  const uploads = devs.length
+    ? await d.sql`select dev, path from uploads where family_id = ${a.familyId} and game = ${game}
+        and dev in ${d.sql(devs)} and received_at >= ${since} order by received_at desc, last_seq desc`
+    : [];
+  const out: Row[] = [];
+  let truncated = false;
+  for (const u of uploads) {
+    const raw = await d.blobs.get(u.path);
+    if (!raw) continue;
+    const text = new TextDecoder().decode(await gunzip(raw, MAX_EVENTS_TEXT));
+    const batch: Row[] = [];
+    for (const l of text.split("\n")) {
+      if (!l.trim()) continue;
+      try {
+        const e = JSON.parse(l);
+        if (e && typeof e.profile === "string" && keys.has(`${e.dev ?? u.dev}/${e.profile}`)) batch.push(e);
+      } catch {
+        // a line the server could not read is skipped, never fatal
+      }
+    }
+    batch.sort((x, y) => (y.seq ?? 0) - (x.seq ?? 0));
+    for (const e of batch) {
+      if (out.length >= limit) {
+        truncated = true;
+        break;
+      }
+      out.push(e);
+    }
+    if (truncated) break;
+  }
+  out.sort((x, y) => (y.t ?? 0) - (x.t ?? 0) || (y.seq ?? 0) - (x.seq ?? 0));
+  return json({ child: childId, game, days, lines: out, truncated });
+}
+
 // ------------------------------------------------------------------ snapshots
 
 async function getSnapshots(req: Request, d: Deps, childId: string, game: string): Promise<Response> {
@@ -645,6 +702,7 @@ export async function handle(req: Request, d: Deps): Promise<Response> {
       need(r, "range: first-last");
       return await putEvents(req, d, a[0], a[1], Number(r[1]), Number(r[2]));
     }
+    if ((a = route("GET", "/children/:c/games/:g/records"))) return await getRecords(req, d, url, a[0], a[1]);
     if ((a = route("GET", "/children/:c/games/:g/snapshots"))) return await getSnapshots(req, d, a[0], a[1]);
     if ((a = route("PUT", "/children/:c/games/:g/snapshots/:dev"))) return await putSnapshot(req, d, a[0], a[1], a[2]);
     if ((a = route("GET", "/children/:c/games/:g/settings"))) return await getSettings(req, d, a[0], a[1]);
