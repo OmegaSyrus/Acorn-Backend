@@ -1,0 +1,58 @@
+# Deploying
+
+Two Supabase projects, both in the Canada region (`ca-central-1`):
+**staging** (free plan while building; it pauses after a week idle) and
+**production** (Pro, $25 a month, once real families use it). The domain is
+Terrence's to-do; until then the API lives at
+`https://<project-ref>.supabase.co/functions/v1/api/v1`.
+
+## One-time setup per project
+
+1. Create the project in the Supabase dashboard (region Canada).
+2. Auth → Providers: **Email** on (magic link, no passwords); **Google** on
+   with a Google Cloud OAuth client (type "Web application"; its authorised
+   redirect URI is the callback URL Supabase shows on that page).
+3. Auth → URL configuration: the parent web app's address as Site URL.
+4. Link and push the database:
+
+   ```sh
+   npx supabase@2 login            # or SUPABASE_ACCESS_TOKEN in the environment
+   npx supabase@2 link --project-ref <ref>
+   npx supabase@2 db push          # runs supabase/migrations/
+   ```
+
+   The migration also makes the private `family` storage bucket.
+5. Function secrets (SUPABASE_URL, SUPABASE_DB_URL and the keys are set by
+   Supabase itself):
+
+   ```sh
+   npx supabase@2 secrets set ACORN_PUBLISH_KEY=<random> ACORN_CRON_KEY=<random> \
+     ACORN_PAIR_URL=https://<parent app>/pair
+   ```
+
+6. Deploy the function: `npx supabase@2 functions deploy api --no-verify-jwt`.
+7. Schedule retention daily (SQL editor; needs the `pg_cron` and `pg_net`
+   extensions from Database → Extensions):
+
+   ```sql
+   select cron.schedule('acorn-retention', '17 7 * * *', $$
+     select net.http_post(
+       url := 'https://<ref>.supabase.co/functions/v1/api/v1/admin/retention',
+       headers := jsonb_build_object('authorization', 'Cron <ACORN_CRON_KEY>')
+     )
+   $$);
+   ```
+
+8. Publish each game build's manifest from its CI:
+   `curl -X PUT -H "Authorization: Publisher $ACORN_PUBLISH_KEY" --data @manifest.json <base>/games/acorn-math/manifests/<code>`.
+
+## Checking a deploy
+
+`curl <base>/health` answers `{"ok":true,"api":"v1"}`. Then the pairing
+round trip from the contract's `samples/api-pair.json` against staging.
+
+## Secrets
+
+Never commit keys. The service role key stays inside Supabase (the function
+reads it from its environment). The parent web app uses only the anon key,
+and row-level security limits what it can read.
