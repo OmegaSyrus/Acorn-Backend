@@ -38,13 +38,32 @@ Terrence's to-do; until then the API lives at
    select cron.schedule('acorn-retention', '17 7 * * *', $$
      select net.http_post(
        url := 'https://<ref>.supabase.co/functions/v1/api/v1/admin/retention',
-       headers := jsonb_build_object('authorization', 'Cron <ACORN_CRON_KEY>')
+       headers := jsonb_build_object('authorization', 'Cron ' ||
+         (select decrypted_secret from vault.decrypted_secrets where name = 'acorn_cron_key')),
+       body := '{}'::jsonb
      )
    $$);
    ```
 
 8. Publish each game build's manifest from its CI:
    `curl -X PUT -H "Authorization: Publisher $ACORN_PUBLISH_KEY" --data @manifest.json <base>/games/acorn-math/manifests/<code>`.
+
+## Staging today
+
+Staging is project `maphrtpqbqmjfmhgqonq` (region `us-east-2`, not Canada;
+fine for staging, production should be made in `ca-central-1`). Deployed
+2026-11-17: migration `20261117000000` applied, bucket `family`, secrets
+`ACORN_PUBLISH_KEY` and `ACORN_CRON_KEY` set (copies in Vault as
+`acorn_publish_key` and `acorn_cron_key`, Database → Vault), function `api`,
+Email and Google sign-in on, daily retention job `acorn-retention` reading
+the cron key from Vault.
+
+From a cloud session, the database port 5432 is blocked, so `db push` fails.
+Run the migration through the Management API instead (HTTPS):
+`POST https://api.supabase.com/v1/projects/<ref>/database/query` with
+`{"query": "<the migration SQL>"}` and the access token, then add its row to
+`supabase_migrations.schema_migrations` so a later `db push` skips it.
+`functions deploy api --no-verify-jwt --use-api` needs no Docker.
 
 ## Checking a deploy
 
