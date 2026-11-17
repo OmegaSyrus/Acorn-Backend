@@ -1,0 +1,41 @@
+# Supabase project settings for local runs (supabase start) and deploys.
+# Staging and production are separate Supabase projects; see docs/deploy.md.
+project_id = "acorn-backend"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public"]
+max_rows = 1000
+
+[db]
+port = 54322
+major_version = 15
+
+[auth]
+enabled = true
+site_url = "http://127.0.0.1:3000"
+additional_redirect_urls = ["http://127.0.0.1:3000/**"]
+jwt_expiry = 3600
+enable_signup = true
+
+[auth.email]
+enable_signup = true
+# sign-in by a one-time link: no passwords
+enable_confirmations = false
+otp_expiry = 3600
+
+[auth.external.google]
+enabled = true
+client_id = "env(GOOGLE_CLIENT_ID)"
+secret = "env(GOOGLE_CLIENT_SECRET)"
+skip_nonce_check = false
+
+[storage]
+enabled = true
+file_size_limit = "5MiB"
+
+# Games send a device token, not a Supabase sign-in, so the function checks
+# every caller itself.
+[functions.api]
+verify_jwt = false

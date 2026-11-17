@@ -1,0 +1,9 @@
+{
+  "tasks": {
+    "test": "deno test -A tests/api/",
+    "check": "deno check supabase/functions/api/index.ts tests/api/*.ts && deno run -A tools/gen_contract.ts --check",
+    "contract": "deno run -A tools/gen_contract.ts"
+  },
+  "fmt": { "lineWidth": 140 },
+  "lint": { "rules": { "exclude": ["no-explicit-any"] } }
+}
