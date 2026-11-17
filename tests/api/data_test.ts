@@ -197,3 +197,35 @@ Deno.test("health and unknown routes", async () => {
     await w.close();
   }
 });
+
+Deno.test("records: a parent reads one child's lines, newest first; mapping later counts", async () => {
+  const w = await world();
+  try {
+    const { parent, dev, bear, wren } = await family(w);
+    const LATE = "p_77777777777a";
+    await w.call("PUT", `/events/acorn-math/${DEV}/1-3`, { auth: dev, raw: new TextEncoder().encode(lines(1, [P1, P2, LATE])) });
+    w.clock.ms += 60_000;
+    await w.call("PUT", `/events/acorn-math/${DEV}/4-5`, { auth: dev, raw: new TextEncoder().encode(lines(4, [P1, P1])) });
+    const r = await w.call("GET", `/children/${bear}/games/acorn-math/records`, { auth: parent });
+    assertEquals(r.status, 200, JSON.stringify(r.body));
+    assertEquals(r.body.lines.map((l: any) => l.seq), [5, 4, 1], "only Bear's lines, newest first");
+    assertEquals(r.body.truncated, false);
+    const capped = await w.call("GET", `/children/${bear}/games/acorn-math/records?limit=2`, { auth: parent });
+    assertEquals(capped.body.lines.length, 2);
+    assertEquals(capped.body.truncated, true);
+    // a profile mapped after its lines were sent: its old lines count now
+    await w.call("PUT", `/devices/${DEV}/profiles`, { auth: dev, body: { profiles: [{ profile: LATE, child: wren, nickname: "Wren 2" }] } });
+    const wr = await w.call("GET", `/children/${wren}/games/acorn-math/records`, { auth: parent });
+    assertEquals(wr.body.lines.map((l: any) => l.seq).sort(), [2, 3]);
+    // older than the window: left out
+    w.clock.ms += 3 * 86400_000;
+    assertEquals((await w.call("GET", `/children/${bear}/games/acorn-math/records?days=1`, { auth: parent })).body.lines, []);
+    // devices and other families can't read them
+    assertEquals((await w.call("GET", `/children/${bear}/games/acorn-math/records`, { auth: dev })).status, 403);
+    const other = await parentWithFamily(w, B);
+    assertEquals((await w.call("GET", `/children/${bear}/games/acorn-math/records`, { auth: other })).status, 404);
+    assertEquals((await w.call("GET", `/children/${bear}/games/acorn-math/records?days=0`, { auth: parent })).status, 400);
+  } finally {
+    await w.close();
+  }
+});
