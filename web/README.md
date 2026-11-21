@@ -10,6 +10,14 @@ Plain HTML and JavaScript, no build step (parent app plan v2, thread 5).
 - `tablet.html` + `tablet.js`: a test tablet that stands in for the game's
   Family screen until the sync add-on exists: shows a pairing code and QR,
   links a player to each child, sends made-up play lines.
+- `pictures/<game>/`: each game's profile pictures as `<id>.png`, plus
+  `pictures.json` (ids and names) used until that game has published a
+  manifest. The picture menu lists the latest manifest's `pictures`, named by
+  its optional `picture_labels`; a child whose picture id has no PNG here
+  shows the id itself, so it is never blank. Nicknames are 12 letters, like
+  the game (the server still accepts 24). Acorn's 14 are the store's hero
+  looks; `bolt_red` and `bolt_green` are Bolt repainted the way the game's
+  `game/ui/look.gd` does it.
 - `config.js`: the Supabase address, its publishable key (public) and the
   /v1 base. Point it at production when that project exists.
 

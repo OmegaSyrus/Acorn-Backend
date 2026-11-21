@@ -466,7 +466,11 @@ export const SCHEMAS = {
     "items": {
      "type": "string"
     },
-    "description": "Profile picture ids."
+    "description": "Profile picture ids, in the order the game offers them. The parent app shows web/pictures/<game>/<id>.png for each."
+   },
+   "picture_labels": {
+    "type": "object",
+    "description": "Optional (added 2026-11-21): picture id to a display name, like \"phoenix\": \"Blaze\". The parent app shows the id itself when a name is missing."
    }
   }
  }

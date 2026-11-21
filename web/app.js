@@ -9,10 +9,15 @@ const sb = createClient(CONFIG.supabaseUrl, CONFIG.supabaseKey, {
   auth: { flowType: "pkce", detectSessionInUrl: true, persistSession: true },
 });
 
-export const PICTURES = {
-  fox: "🦊", bunny: "🐰", owl: "🦉", hedgehog: "🦔", bear: "🐻", frog: "🐸",
-  cat: "🐱", dog: "🐶", turtle: "🐢", dragon: "🐉", unicorn: "🦄", bee: "🐝",
+// Profile pictures come from the game (profile plan C2, 2026-11-21): the ids in
+// its latest manifest's `pictures`, drawn from pictures/<game>/<id>.png, names
+// from `picture_labels`. Until a manifest is published, pictures/<game>/pictures.json
+// holds the same list. LEGACY keeps the first web app's emoji ids readable.
+const LEGACY = {
+  owl: "🦉", bear: "🐻", frog: "🐸", cat: "🐱", dog: "🐶", dragon: "🐉", unicorn: "🦄", bee: "🐝",
 };
+export const PICTURES = { ids: [], labels: {} };
+const NAME_MAX = 12; // the game's limit; the server allows 24
 const WORLDS = { lava_caves: "Lava Caves", crystal_mines: "Crystal Mines", bog: "the Bog", mushroom_forest: "Mushroom Forest", space: "Space" };
 const WHERE = { stone: "Stepping stones", fight: "Fights", duel: "Miniboss duels", boss: "Boss fights" };
 const PENDING_PAIR = "acorn.pendingPair";
@@ -25,8 +30,42 @@ const state = { session: null, family: null, skills: {}, view: "home", child: nu
 function esc(v) {
   return String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 }
+function picName(id) {
+  return PICTURES.labels[id] ?? id;
+}
+/** A child's picture: the game's art, an old emoji, or the id itself. Never blank. */
 function pic(id) {
-  return PICTURES[id] ?? "🙂";
+  if (PICTURES.ids.includes(id)) {
+    // a manifest id with no PNG here yet falls back to showing the id
+    return `<img src="pictures/${esc(CONFIG.game)}/${esc(id)}.png" alt="${esc(picName(id))}" title="${esc(picName(id))}" data-id="${esc(id)}"
+      onerror="this.replaceWith(Object.assign(document.createElement('span'), {className: 'picid', textContent: this.dataset.id}))">`;
+  }
+  if (LEGACY[id]) return `<span title="${esc(id)}">${LEGACY[id]}</span>`;
+  return `<span class="picid" title="Picture ${esc(id)}">${esc(id || "?")}</span>`;
+}
+/** Picture tiles to pick from. A child's unknown id stays as its own tile so saving keeps it. */
+function picturePicker(name, sel) {
+  const ids = [...PICTURES.ids];
+  if (sel && !ids.includes(sel)) ids.push(sel);
+  if (!sel) sel = ids[0];
+  return `<fieldset class="picker"><legend class="small muted">Picture</legend>${ids.map((id) => `
+    <label class="tile" title="${esc(picName(id))}"><input type="radio" name="${esc(name)}" value="${esc(id)}" ${id === sel ? "checked" : ""}>
+      <span class="pic">${pic(id)}</span><span class="small">${esc(picName(id))}</span></label>`).join("")}</fieldset>`;
+}
+async function loadPictures() {
+  let m = null;
+  try {
+    const r = await fetch(`${CONFIG.api}/games/${CONFIG.game}/manifests/latest`);
+    if (r.ok) m = await r.json();
+  } catch { /* offline: use the local list */ }
+  if (!Array.isArray(m?.pictures) || !m.pictures.length) {
+    try {
+      const r = await fetch(`pictures/${CONFIG.game}/pictures.json`);
+      if (r.ok) m = await r.json();
+    } catch { /* keep empty */ }
+  }
+  PICTURES.ids = (m?.pictures ?? []).filter((id) => typeof id === "string");
+  PICTURES.labels = m?.picture_labels && typeof m.picture_labels === "object" ? m.picture_labels : {};
 }
 function when(v) {
   if (!v) return "never";
@@ -106,6 +145,7 @@ async function start() {
   fetch("../contract/skills.json").then((r) => r.ok ? r.json() : null).then((j) => {
     for (const s of j?.skills ?? []) state.skills[s.id] = s.label;
   }).catch(() => {});
+  await loadPictures();
   sb.auth.onAuthStateChange((_e, session) => {
     const was = state.session?.user?.id;
     state.session = session;
@@ -221,7 +261,6 @@ function homeView(msg) {
   const canEdit = f.role === "owner" || f.role === "caregiver";
   const pending = load(PENDING_PAIR) ?? "";
   const childName = Object.fromEntries(f.children.map((c) => [c.child, c.nickname]));
-  const pictureOptions = (sel) => Object.entries(PICTURES).map(([k, v]) => `<option value="${k}" ${k === sel ? "selected" : ""}>${v} ${k}</option>`).join("");
   app.innerHTML = `
     ${msg}
     <div class="card">
@@ -240,10 +279,12 @@ function homeView(msg) {
           </div>`).join("") : `<p class="muted">No children yet. Add one below, then add their tablet.</p>`}
       </div>
       ${canEdit ? `
-      <form id="addChild" class="row" style="margin-top:12px">
-        <input id="nick" class="grow" required maxlength="24" placeholder="Nickname">
-        <input id="year" type="number" min="2000" max="2100" placeholder="Birth year (optional)" style="width:190px">
-        <select id="picture">${pictureOptions("fox")}</select>
+      <form id="addChild" style="margin-top:12px">
+        <div class="row">
+          <input id="nick" class="grow" required maxlength="${NAME_MAX}" placeholder="Nickname (up to ${NAME_MAX} letters)">
+          <input id="year" type="number" min="2000" max="2100" placeholder="Birth year (optional)" style="width:190px">
+        </div>
+        ${picturePicker("picture", "")}
         <button>Add child</button>
       </form>` : ""}
     </div>
@@ -292,7 +333,7 @@ function homeView(msg) {
         state.msg = null;
         return render();
       }
-      if (act === "edit") return editChild(el, c, pictureOptions);
+      if (act === "edit") return editChild(el, c);
       if (act === "delete") {
         if (!confirm(`Remove ${c.nickname} and all their play records? This cannot be undone.`)) return;
         try {
@@ -332,7 +373,7 @@ function homeView(msg) {
     try {
       await api("POST", "/family/children", {
         nickname: document.getElementById("nick").value.trim(),
-        picture: document.getElementById("picture").value,
+        picture: add.querySelector("input[name=picture]:checked")?.value ?? PICTURES.ids[0] ?? "fox",
         ...(year ? { birth_year: Number(year) } : {}),
       });
       state.msg = null;
@@ -382,13 +423,15 @@ function homeView(msg) {
   };
 }
 
-function editChild(el, c, pictureOptions) {
+function editChild(el, c) {
   el.innerHTML = `
-    <form class="row grow">
-      <input name="nick" class="grow" required maxlength="24" value="${esc(c.nickname)}">
-      <input name="year" type="number" min="2000" max="2100" placeholder="Birth year" value="${esc(c.birth_year ?? "")}" style="width:140px">
-      <select name="picture">${pictureOptions(c.picture)}</select>
-      <button>Save</button><button type="button" class="ghost" data-cancel>Cancel</button>
+    <form class="grow">
+      <div class="row">
+        <input name="nick" class="grow" required maxlength="${NAME_MAX}" value="${esc(c.nickname)}">
+        <input name="year" type="number" min="2000" max="2100" placeholder="Birth year" value="${esc(c.birth_year ?? "")}" style="width:140px">
+      </div>
+      ${picturePicker("picture", c.picture)}
+      <div class="row"><button>Save</button><button type="button" class="ghost" data-cancel>Cancel</button></div>
     </form>`;
   const form = el.querySelector("form");
   form.querySelector("[data-cancel]").onclick = () => render();
@@ -397,7 +440,7 @@ function editChild(el, c, pictureOptions) {
     try {
       await api("PATCH", `/children/${c.child}`, {
         nickname: form.nick.value.trim(),
-        picture: form.picture.value,
+        picture: form.querySelector("input[name=picture]:checked")?.value ?? c.picture,
         birth_year: form.year.value ? Number(form.year.value) : null,
       });
       state.msg = null;

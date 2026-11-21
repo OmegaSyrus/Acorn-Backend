@@ -41,6 +41,7 @@ POST   /v1/devices/pair/approve        {code, device_name}      owner or caregiv
 GET    /v1/devices/pair/poll?pair_id=                           the tablet
 PATCH  /v1/devices/{dev}               {name}                   owner or caregiver
 DELETE /v1/devices/{dev}                                        owner or caregiver: the tablet hears "gone"
+GET    /v1/devices/{dev}/profiles                               the device itself: its map + the family's children
 PUT    /v1/devices/{dev}/profiles      {profiles: [...]}        the device itself
 PUT    /v1/events/{game}/{dev}/{first_seq}-{last_seq}           the device itself
 GET    /v1/children/{child}/games/{game}/records?days=&limit=   parent: the child's play log lines
@@ -83,7 +84,22 @@ approves the pairing.
    `{profiles: [{profile, child, nickname, picture, guest}]}`: which local
    profile is which child, picked on the tablet behind the PIN. A Guest never
    maps to a child. Profiles are added or updated, never forgotten, so old
-   events keep their child.
+   events keep their child. The answer is
+   `{profiles: [{profile, child, nickname, picture, guest}], children: [{child, nickname, picture}], created: [{profile, child}]}`
+   (`children` and `created` added 2026-11-21; older games ignore them).
+5. A profile made on the tablet after pairing (profile plan C4, 2026-11-21):
+   send its item with `"child": "new"` and its `nickname` (1 to 24
+   characters) and `picture`. The server makes the family child, maps the
+   profile to it, and lists it in `created`. Sent again, the profile already
+   maps to that child, so no second child is made. Past 12 children in the
+   family the whole call answers `409 {error: "conflict", reason: "children_limit", profile}`
+   and nothing in it is written. A Guest with `"child": "new"` stays unmapped.
+6. `GET /v1/devices/{dev}/profiles` (profile plan C3, 2026-11-21) answers the
+   same `{profiles, children}` at any time, so a tablet sees a child a parent
+   added or removed on the web after pairing. A removed child leaves
+   `children`; a profile that mapped to it keeps its row with `child: null`.
+   Only the device itself may call it (`403` for any other device, `410` once
+   a parent removed it).
 
 ## Events
 
