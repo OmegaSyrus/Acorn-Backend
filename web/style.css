@@ -30,7 +30,15 @@ button.danger { background: transparent; color: var(--bad); border-color: var(--
 button:disabled { opacity: .5; cursor: default; }
 .list > * + * { border-top: 1px solid var(--line); }
 .item { display: flex; gap: 12px; align-items: center; padding: 10px 0; flex-wrap: wrap; }
-.pic { font-size: 30px; width: 44px; text-align: center; }
+.pic { font-size: 30px; width: 56px; height: 56px; display: flex; align-items: center; justify-content: center; flex: none; }
+.pic img { max-width: 100%; max-height: 100%; image-rendering: pixelated; }
+.picid { font-size: 11px; line-height: 1.2; word-break: break-all; text-align: center; color: var(--muted); border: 1px dashed var(--line); border-radius: 8px; padding: 4px; }
+.picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 6px; border: 0; padding: 0; margin: 10px 0; }
+.picker legend { padding: 0; margin-bottom: 4px; }
+.tile { position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 4px; border: 2px solid var(--line); border-radius: 12px; cursor: pointer; text-align: center; }
+.tile input { position: absolute; opacity: 0; pointer-events: none; }
+.tile:has(input:checked) { border-color: var(--accent); background: var(--soft); }
+.tile:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
 .banner { background: var(--warn-bg); color: var(--warn-ink); padding: 8px 16px; font-size: 14px; text-align: center; }
 .msg { padding: 10px 12px; border-radius: 10px; background: var(--soft); margin: 10px 0; }
 .msg.err { color: var(--bad); }

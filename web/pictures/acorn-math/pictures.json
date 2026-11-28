@@ -1,0 +1,35 @@
+{
+ "_note": "Fallback when no manifest is published yet: the same ids and names as contract/samples/manifest.json (pictures, picture_labels).",
+ "pictures": [
+  "robodragon",
+  "bolt_red",
+  "bolt_green",
+  "fox",
+  "bunny",
+  "hedgehog",
+  "turtle",
+  "lion",
+  "eagle",
+  "phoenix",
+  "gryphon",
+  "elf_mage",
+  "templar",
+  "slime_knight"
+ ],
+ "picture_labels": {
+  "robodragon": "Bolt",
+  "bolt_red": "Red Bolt",
+  "bolt_green": "Green Bolt",
+  "fox": "Rusty",
+  "bunny": "Nutkin",
+  "hedgehog": "Spike",
+  "turtle": "Shelly",
+  "lion": "Leo",
+  "eagle": "Talon",
+  "phoenix": "Blaze",
+  "gryphon": "Griff",
+  "elf_mage": "Rowan",
+  "templar": "Sir Tam",
+  "slime_knight": "Sir Blob"
+ }
+}

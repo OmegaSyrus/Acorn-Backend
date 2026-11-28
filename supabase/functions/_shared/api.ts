@@ -386,24 +386,69 @@ async function removeDevice(req: Request, d: Deps, dev: string): Promise<Respons
   return json({ removed: true });
 }
 
+/** The device's profile map plus the family's children, for GET and PUT. */
+async function profilesView(sql: Sql, dev: string, familyId: string): Promise<Row> {
+  const rows = await sql`select profile, child_id as child, nickname, picture, guest from device_profiles where dev = ${dev} order by profile`;
+  const children = await sql`select id as child, nickname, picture from children where family_id = ${familyId} order by created_at`;
+  return { profiles: [...rows], children: [...children] };
+}
+
+/** GET /v1/devices/{dev}/profiles (profile plan C3): a paired tablet reads its
+ * map and the family's children again, so it sees a child added or removed
+ * on the web after pairing. */
+async function getProfiles(req: Request, d: Deps, dev: string): Promise<Response> {
+  const me = await device(req, d);
+  need(me.id === dev, "a device reads only its own profiles", "forbidden");
+  return json(await profilesView(d.sql, dev, me.familyId));
+}
+
+/** PUT /v1/devices/{dev}/profiles. An item with "child": "new" (profile plan
+ * C4) makes the family child from its nickname and picture and maps it in the
+ * same call. Sent again, it finds the child that profile already maps to and
+ * makes no second one. */
 async function putProfiles(req: Request, d: Deps, dev: string): Promise<Response> {
   const me = await device(req, d);
   need(me.id === dev, "a device sets only its own profiles", "forbidden");
   const b = await body(req);
   need(Array.isArray(b.profiles) && b.profiles.length <= 16, "profiles: a list of at most 16");
-  const kids = new Set((await d.sql`select id from children where family_id = ${me.familyId}`).map((r: Row) => r.id));
   for (const p of b.profiles) {
     need(p && typeof p.profile === "string" && PROFILE.test(p.profile), "profile: p_ + 12 hex");
-    const guest = p.guest === true;
-    const child = guest ? null : (p.child ?? null);
-    need(child === null || kids.has(child), `child ${child} is not in this family`);
-    await d.sql`insert into device_profiles (dev, profile, child_id, nickname, picture, guest, updated_at)
-      values (${dev}, ${p.profile}, ${child}, ${String(p.nickname ?? "").slice(0, 24)}, ${String(p.picture ?? "").slice(0, 32)}, ${guest}, ${nowTs(d)})
-      on conflict (dev, profile) do update set child_id = excluded.child_id, nickname = excluded.nickname,
-        picture = excluded.picture, guest = excluded.guest, updated_at = excluded.updated_at`;
+    if (p.child === "new" && p.guest !== true) {
+      need(typeof p.nickname === "string" && p.nickname.trim().length >= 1 && p.nickname.trim().length <= 24, "a new child needs a nickname of 1 to 24 characters");
+      need(p.picture === undefined || (typeof p.picture === "string" && PICTURE.test(p.picture)), "picture: a picture id");
+    }
   }
-  const rows = await d.sql`select profile, child_id as child, nickname, picture, guest from device_profiles where dev = ${dev} order by profile`;
-  return json({ profiles: [...rows] });
+  const created: Row[] = [];
+  const out = await d.sql.begin(async (tx) => {
+    // one writer per family at a time, so two tablets can't pass the limit together
+    await tx`select id from families where id = ${me.familyId} for update`;
+    const kids = new Set((await tx`select id from children where family_id = ${me.familyId}`).map((r: Row) => r.id));
+    const mapped = new Map((await tx`select profile, child_id from device_profiles where dev = ${dev}`).map((r: Row) => [r.profile, r.child_id]));
+    for (const p of b.profiles) {
+      const guest = p.guest === true;
+      let child = guest ? null : (p.child ?? null);
+      if (child === "new") {
+        const had = mapped.get(p.profile);
+        if (had && kids.has(had)) child = had;
+        else {
+          if (kids.size >= MAX_CHILDREN) throw new ApiError("conflict", `at most ${MAX_CHILDREN} children`, { reason: "children_limit", profile: p.profile });
+          const [c] = await tx`insert into children (family_id, nickname, picture)
+            values (${me.familyId}, ${p.nickname.trim()}, ${p.picture ?? "fox"}) returning id`;
+          child = c.id as string;
+          kids.add(child);
+          created.push({ profile: p.profile, child });
+        }
+      }
+      need(child === null || kids.has(child), `child ${child} is not in this family`);
+      mapped.set(p.profile, child);
+      await tx`insert into device_profiles (dev, profile, child_id, nickname, picture, guest, updated_at)
+        values (${dev}, ${p.profile}, ${child}, ${String(p.nickname ?? "").slice(0, 24)}, ${String(p.picture ?? "").slice(0, 32)}, ${guest}, ${nowTs(d)})
+        on conflict (dev, profile) do update set child_id = excluded.child_id, nickname = excluded.nickname,
+          picture = excluded.picture, guest = excluded.guest, updated_at = excluded.updated_at`;
+    }
+    return await profilesView(tx as unknown as Sql, dev, me.familyId);
+  });
+  return json({ ...out, created });
 }
 
 // ------------------------------------------------------------------ events
@@ -696,6 +741,7 @@ export async function handle(req: Request, d: Deps): Promise<Response> {
     if ((a = route("GET", "/devices/pair/poll"))) return await pairPoll(req, d, url);
     if ((a = route("PATCH", "/devices/:dev"))) return await patchDevice(req, d, a[0]);
     if ((a = route("DELETE", "/devices/:dev"))) return await removeDevice(req, d, a[0]);
+    if ((a = route("GET", "/devices/:dev/profiles"))) return await getProfiles(req, d, a[0]);
     if ((a = route("PUT", "/devices/:dev/profiles"))) return await putProfiles(req, d, a[0]);
     if ((a = route("PUT", "/events/:game/:dev/:range"))) {
       const r = /^(\d+)-(\d+)$/.exec(a[2]);
