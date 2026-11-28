@@ -4,7 +4,7 @@
 import { ApiError, body, CORS, errorResponse, json, need } from "./http.ts";
 import type { Deps, Sql } from "./deps.ts";
 import { schemaErrors } from "./schema.ts";
-import { SCHEMAS, SKILL_LABELS } from "./contract.ts";
+import { FALLBACK_MANIFESTS, SCHEMAS, SKILL_LABELS } from "./contract.ts";
 import { type ChildReport, gameReport, safeTz, weeklyEmail } from "./report.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -585,7 +585,7 @@ async function childGames(d: Deps, familyId: string, childId: string): Promise<s
 
 async function latestManifest(d: Deps, game: string): Promise<Row | null> {
   const [m] = await d.sql`select body from manifests where game = ${game} order by code desc limit 1`;
-  return m?.body ?? null;
+  return m?.body ?? FALLBACK_MANIFESTS[game] ?? null;
 }
 
 async function snapshotBodies(d: Deps, childId: string, game: string): Promise<Row[]> {

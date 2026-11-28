@@ -1,7 +1,7 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { CRON_KEY, pairedDevice, parentWithFamily, PUBLISH_KEY, sample, sampleLines, world, type World } from "./helpers.ts";
 import type { Mail } from "../../supabase/functions/_shared/deps.ts";
-import { gameReport, sessions, weeklyEmail } from "../../supabase/functions/_shared/report.ts";
+import { clearedText, gameReport, sessions, weeklyEmail } from "../../supabase/functions/_shared/report.ts";
 
 const A = "00000000-0000-4000-8000-00000000000a";
 const C = "00000000-0000-4000-8000-00000000000c";
@@ -140,6 +140,10 @@ Deno.test("report pieces: sessions split on gaps and devices; empty week reads w
   const g = gameReport("acorn-math", [], [], null, {});
   assertEquals(g.answers, 0);
   assertEquals(g.progress, null);
+  const noList = gameReport("x-game", [], [{ saved_at: 1, save: { marks: { w: [1, 2] } } }], null, {});
+  assertEquals(noList.progress!.worlds[0].complete, false, "without the level list, never claim a world is complete");
   const e = weeklyEmail({ children: [{ child: "c_000000000001", nickname: "Wren", games: [g] }], from: 0, to: 7 * 86400, tz: "Nope/Nowhere" });
   assert(e.text.includes("No play this week."));
+  const lv = (label: string, num: number) => ({ world: "", label, num, id: null, at: 0 });
+  assertEquals(clearedText([lv("Lava Caves", 2), lv("Lava Caves", 2), lv("Bog", 1)]), "Lava Caves 2 (2 times), Bog 1");
 });

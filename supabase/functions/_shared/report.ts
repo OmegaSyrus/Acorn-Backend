@@ -121,7 +121,8 @@ function progressFrom(snapshots: Row[], manifest: Row | null): GameReport["progr
     const got = marks[w] ?? new Set<number>();
     const done = ids.length ? ids.filter((id) => got.has(id)).length : got.size;
     const total = ids.length || got.size;
-    return { world: w, label: labels[w] ?? w, done, total, stars: (stars[w] ?? new Set()).size, complete: total > 0 && done >= total };
+    // without the game's level list, "complete" can't be known
+    return { world: w, label: labels[w] ?? w, done, total, stars: (stars[w] ?? new Set()).size, complete: ids.length > 0 && done >= total };
   });
   const lv = newest?.save?.difficulty;
   return {
@@ -241,6 +242,16 @@ function minutesText(m: number): string {
   return `${Math.floor(m / 60)} h ${m % 60} min`;
 }
 
+/** "Lava Caves 2 (3 times), Crystal Mines 1": each level once, in play order. */
+export function clearedText(cleared: GameReport["cleared"]): string {
+  const n = new Map<string, number>();
+  for (const l of cleared) {
+    const k = `${l.label}${l.num ? ` ${l.num}` : ""}`;
+    n.set(k, (n.get(k) ?? 0) + 1);
+  }
+  return [...n].map(([k, c]) => (c > 1 ? `${k} (${c} times)` : k)).join(", ");
+}
+
 /** The weekly email for one adult: subject, plain text and HTML. */
 export function weeklyEmail(o: { children: ChildReport[]; from: number; to: number; tz: string; appUrl?: string; warnIdle?: boolean }): {
   subject: string;
@@ -278,7 +289,7 @@ export function weeklyEmail(o: { children: ChildReport[]; from: number; to: numb
         `<b>${esc(minutesText(g.minutes))}</b> over ${g.days_played} day${g.days_played === 1 ? "" : "s"} · <b>${g.answers}</b> questions · ` +
         `<b>${g.right_pct}%</b> right first time</p>`);
       if (g.cleared.length) {
-        const list = g.cleared.map((l) => `${l.label}${l.num ? ` ${l.num}` : ""}`).join(", ");
+        const list = clearedText(g.cleared);
         text.push(`Levels finished: ${list}`);
         html.push(`<p style="margin:0 0 6px">Levels finished: ${esc(list)}</p>`);
       }

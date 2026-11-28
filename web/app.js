@@ -526,7 +526,12 @@ function gameSection(g, { print = false } = {}) {
     <div class="scroll"><table><tr><th>Sum</th><th>Tries</th><th>Missed</th><th>Slow</th><th>Average time</th></tr>
     ${g.practice.map((x) => `<tr><td><b>${esc(x.q)}</b></td><td>${x.tries}</td><td>${x.missed}</td><td>${x.slow}</td><td>${x.avg_secs} s</td></tr>`).join("")}
     </table></div>` : "";
-  const cleared = g.cleared.length ? `<p><b>Levels finished:</b> ${esc(g.cleared.map((l) => `${l.label}${l.num ? ` ${l.num}` : ""}`).join(", "))}</p>` : "";
+  const counts = new Map();
+  for (const l of g.cleared) {
+    const k = `${l.label}${l.num ? ` ${l.num}` : ""}`;
+    counts.set(k, (counts.get(k) ?? 0) + 1);
+  }
+  const cleared = counts.size ? `<p><b>Levels finished:</b> ${esc([...counts].map(([k, n]) => (n > 1 ? `${k} (${n} times)` : k)).join(", "))}</p>` : "";
   return `
     <div class="stats">
       <div class="stat"><b>${mins(g.minutes)}</b>played over ${plural(g.days_played, "day")}</div>
@@ -742,9 +747,11 @@ async function emailCard() {
   try {
     me = await api("GET", "/family/me");
   } catch (e) {
-    box.innerHTML = `<div class="msg err">${esc(e.message)}</div>`;
+    if (box.isConnected) box.innerHTML = `<div class="msg err">${esc(e.message)}</div>`;
     return;
   }
+  // the page was drawn again while this loaded: that drawing fills its own card
+  if (!box.isConnected) return;
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   if (!me.tz && tz) api("PATCH", "/family/me", { tz }).catch(() => {});
   box.innerHTML = `
