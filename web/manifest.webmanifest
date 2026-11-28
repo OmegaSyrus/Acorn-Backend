@@ -1,0 +1,15 @@
+{
+  "name": "Acorn Grown-ups",
+  "short_name": "Grown-ups",
+  "description": "See how your children are doing in Acorn games, and add their tablets.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#2e5e3e",
+  "theme_color": "#2e5e3e",
+  "icons": [
+    {"src": "icons/acorn-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+    {"src": "icons/acorn-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+  ]
+}

@@ -59,3 +59,20 @@ th { color: var(--muted); font-weight: 600; }
 a { color: var(--accent); }
 .center { text-align: center; }
 .qr img, .qr canvas { image-rendering: pixelated; background: #fff; padding: 8px; border-radius: 8px; }
+h3 { font-size: 15px; margin: 16px 0 6px; }
+hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
+iframe.mail { width: 100%; height: 520px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.sheet-head { display: flex; justify-content: space-between; gap: 12px; border-bottom: 2px solid var(--ink); padding-bottom: 8px; margin-bottom: 10px; }
+.sign { margin-top: 28px; display: grid; gap: 18px; font-size: 14px; }
+.sign .line { border-bottom: 1px solid var(--ink); height: 26px; }
+@media print {
+  :root { --bg: #fff; --card: #fff; --ink: #000; --muted: #444; --line: #bbb; --soft: #f2f2f2; }
+  header, #banner, .noprint, .msg { display: none !important; }
+  main { max-width: none; padding: 0; }
+  .card.printable { border: 0; padding: 0; }
+  .stats { grid-template-columns: repeat(3, 1fr); }
+  .stat { border: 1px solid #bbb; background: none; }
+  section.game, table { break-inside: auto; }
+  tr, .stat, h3 { break-inside: avoid; }
+  h2, h3 { break-after: avoid; }
+}
