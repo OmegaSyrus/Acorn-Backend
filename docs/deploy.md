@@ -78,6 +78,13 @@ fine for staging, production should be made in `ca-central-1`). Deployed
 Email and Google sign-in on, daily retention job `acorn-retention` reading
 the cron key from Vault.
 
+2026-11-28: function redeployed with reports and the weekly email,
+migration `20261128000000` applied, Acorn Mathematics manifest code 55
+(with `daily_minutes` and `bedtime`) stored in `manifests` straight through
+the Management API (checked against `manifest.v1.schema.json` first), since a
+cloud session can't read the publisher key. The weekly cron job is not
+scheduled yet: no mail account.
+
 From a cloud session, the database port 5432 is blocked, so `db push` fails.
 Run the migration through the Management API instead (HTTPS):
 `POST https://api.supabase.com/v1/projects/<ref>/database/query` with

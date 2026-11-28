@@ -75,7 +75,8 @@ approves the pairing.
 ## Pairing (no child ever types a login)
 
 1. Game: `POST /v1/devices/pair/start` with `{game, dev, app, code}`.
-   Answer `201`: `{pair_id, code: "K7Q-42M", qr_url, expires_in: 600}`. The
+   Answer `201`: `{pair_id, code: "K7Q-42M", qr_url, expires_in: 600}`
+   (`pair_id` is `pr_` and 32 hex digits, the poll's secret). The
    game shows the code and a QR behind the parent PIN. Codes skip look-alike
    letters (no 0, O, 1, I, L) and accept lower case and spaces.
 2. Parent, signed in on their phone: `POST /v1/devices/pair/approve` with
@@ -85,7 +86,9 @@ approves the pairing.
    `{state: "waiting", expires_in}`, `{state: "expired"}`, or once approved
    `{state: "approved", device_token, family, dev, name, children: [{child, nickname, picture}]}`.
    The token is handed over once; the server keeps only its hash. It goes in
-   `user://device_token.json`, which is never backed up.
+   `user://device_token.json`, which is never backed up. The pairing is
+   forgotten as it is handed over (and as `expired` is answered), so a later
+   poll with the same `pair_id` answers `404`: start a new pairing.
 4. Game: `PUT /v1/devices/{dev}/profiles` with
    `{profiles: [{profile, child, nickname, picture, guest}]}`: which local
    profile is which child, picked on the tablet behind the PIN. A Guest never
@@ -168,7 +171,8 @@ while the preview still works.
 
 `PUT .../snapshots/{dev}` with a `family.snapshot` body (at most 512 KB).
 The server keeps the latest per child per game per device: `rev` must be
-higher than the stored one, else `409 {stored_rev}`. The stored copy's
+higher than the stored one, else `409 {stored_rev}`; stored, it answers
+`200 {stored: true, rev}`. The stored copy's
 `child` is set to the path's child. `GET .../snapshots` returns
 `{child, game, snapshots: [...]}`, every device's latest, newest first; the
 game merges them (`games/acorn-math/README.md`).
