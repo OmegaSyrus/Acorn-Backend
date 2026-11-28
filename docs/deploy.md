@@ -45,7 +45,27 @@ Terrence's to-do; until then the API lives at
    $$);
    ```
 
-8. Publish each game build's manifest from its CI:
+8. Schedule the weekly email (Mondays 13:00 UTC, morning in Canada):
+
+   ```sql
+   select cron.schedule('acorn-weekly', '0 13 * * 1', $$
+     select net.http_post(
+       url := 'https://<ref>.supabase.co/functions/v1/api/v1/admin/weekly',
+       headers := jsonb_build_object('authorization', 'Cron ' ||
+         (select decrypted_secret from vault.decrypted_secrets where name = 'acorn_cron_key')),
+       body := '{}'::jsonb
+     )
+   $$);
+   ```
+
+   It sends nothing until a mail account is set: make a Resend account
+   (https://resend.com, free for 3,000 emails a month), verify the sending
+   domain, then
+   `npx supabase@2 secrets set RESEND_API_KEY=<key> ACORN_MAIL_FROM="Acorn <reports@<domain>>" ACORN_APP_URL=<parent app address>`.
+   Use the same account as Supabase Auth's custom SMTP (smtp.resend.com,
+   user `resend`, the key as password) so sign-in emails stop being
+   rate-limited and can carry the 6-digit code.
+9. Publish each game build's manifest from its CI:
    `curl -X PUT -H "Authorization: Publisher $ACORN_PUBLISH_KEY" --data @manifest.json <base>/games/acorn-math/manifests/<code>`.
 
 ## Staging today
@@ -57,6 +77,13 @@ fine for staging, production should be made in `ca-central-1`). Deployed
 `acorn_publish_key` and `acorn_cron_key`, Database → Vault), function `api`,
 Email and Google sign-in on, daily retention job `acorn-retention` reading
 the cron key from Vault.
+
+2026-11-28: function redeployed with reports and the weekly email,
+migration `20261128000000` applied, Acorn Mathematics manifest code 55
+(with `daily_minutes` and `bedtime`) stored in `manifests` straight through
+the Management API (checked against `manifest.v1.schema.json` first), since a
+cloud session can't read the publisher key. The weekly cron job is not
+scheduled yet: no mail account.
 
 From a cloud session, the database port 5432 is blocked, so `db push` fails.
 Run the migration through the Management API instead (HTTPS):

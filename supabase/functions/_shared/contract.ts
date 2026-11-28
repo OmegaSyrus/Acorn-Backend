@@ -483,3 +483,21 @@ export const SCHEMAS = {
  }
 } as const;
 export const SKILLS: string[] = ["count.to6","numeral.match.to6","add.within6","add.within10","add.within20","sub.within6","sub.within10","sub.within20","missing_addend.within10","missing_addend.within20","missing_subtrahend.within10","add3.within20","addsub3.within20","add.within40"];
+// Used for a game's names and levels until its first manifest is published.
+export const FALLBACK_MANIFESTS: Record<string, Record<string, unknown>> = {"acorn-math":{"title":"Acorn Mathematics","labels":{"lava_caves":"Lava Caves","crystal_mines":"Crystal Mines","bog":"The Bog","mushroom_forest":"Mushroom Forest","space":"Space"},"levels":[{"id":1,"world":"lava_caves","num":1},{"id":12,"world":"lava_caves","num":2},{"id":13,"world":"lava_caves","num":3},{"id":14,"world":"lava_caves","num":4},{"id":15,"world":"lava_caves","num":5},{"id":16,"world":"lava_caves","num":6},{"id":21,"world":"crystal_mines","num":1},{"id":22,"world":"crystal_mines","num":2},{"id":23,"world":"crystal_mines","num":3},{"id":24,"world":"crystal_mines","num":4},{"id":25,"world":"crystal_mines","num":5},{"id":26,"world":"crystal_mines","num":6},{"id":31,"world":"bog","num":1},{"id":32,"world":"bog","num":2},{"id":33,"world":"bog","num":3},{"id":34,"world":"bog","num":4},{"id":35,"world":"bog","num":5},{"id":36,"world":"bog","num":6},{"id":41,"world":"mushroom_forest","num":1},{"id":42,"world":"mushroom_forest","num":2},{"id":43,"world":"mushroom_forest","num":3},{"id":44,"world":"mushroom_forest","num":4},{"id":45,"world":"mushroom_forest","num":5},{"id":46,"world":"mushroom_forest","num":6},{"id":51,"world":"space","num":1},{"id":52,"world":"space","num":2},{"id":53,"world":"space","num":3},{"id":54,"world":"space","num":4},{"id":55,"world":"space","num":5},{"id":56,"world":"space","num":6}]}};
+export const SKILL_LABELS: Record<string, string> = {
+ "count.to6": "Count the dots on one die",
+ "numeral.match.to6": "Match a number to a die face",
+ "add.within6": "Add two numbers, total up to 6",
+ "add.within10": "Add two numbers, total up to 10",
+ "add.within20": "Add two numbers, total up to 20",
+ "sub.within6": "Take away, from up to 6",
+ "sub.within10": "Take away, from up to 10",
+ "sub.within20": "Take away, from up to 20",
+ "missing_addend.within10": "Find the missing number: 3 + ? = 7, total up to 10",
+ "missing_addend.within20": "Find the missing number, total up to 20",
+ "missing_subtrahend.within10": "Find what was taken away: 6 - ? = 2",
+ "add3.within20": "Add three or more numbers, total up to 20",
+ "addsub3.within20": "Add and take away with three or more numbers",
+ "add.within40": "Add onto a bigger number, total up to 40"
+};

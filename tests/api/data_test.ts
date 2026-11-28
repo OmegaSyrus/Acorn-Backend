@@ -106,7 +106,7 @@ Deno.test("settings: from the manifest, latest change wins", async () => {
       code: 43,
       settings: [
         { key: "daily_minutes", type: "int", min: 0, max: 120, default: 0, label: "Daily time limit", since_code: 43 },
-        { key: "no_play_after", type: "time", default: null, label: "No play after", since_code: 43 },
+        { key: "bedtime", type: "time", default: null, label: "Bedtime", since_code: 43 },
         { key: "volume", type: "int", min: 0, max: 10, default: 8, label: "Volume", since_code: 43, scope: "device" },
       ],
     };
@@ -120,14 +120,14 @@ Deno.test("settings: from the manifest, latest change wins", async () => {
     const p1 = await w.call("PATCH", url, { auth: parent, body: { fields: { daily_minutes: { value: 30 } } } });
     assertEquals(p1.body.fields.daily_minutes, { value: 30, rev: 1, at: w.clock.ms / 1000, by: "parent" });
     w.clock.ms += 1000;
-    const p2 = await w.call("PATCH", url, { auth: dev, body: { fields: { daily_minutes: { value: 45 }, no_play_after: { value: "19:30" } } } });
+    const p2 = await w.call("PATCH", url, { auth: dev, body: { fields: { daily_minutes: { value: 45 }, bedtime: { value: "19:30" } } } });
     assertEquals(p2.body.rev, 2);
     assertEquals(p2.body.fields.daily_minutes.by, `device:${DEV}`, "the tablet's change is the latest");
     assertEquals(p2.body.fields.daily_minutes.value, 45);
     assertEquals((await w.call("PATCH", url, { auth: parent, body: { fields: { level: { value: 3 } } } })).status, 422, "no remote Level");
     assertEquals((await w.call("PATCH", url, { auth: parent, body: { fields: { volume: { value: 3 } } } })).status, 422, "device settings never sync");
     assertEquals((await w.call("PATCH", url, { auth: parent, body: { fields: { daily_minutes: { value: 500 } } } })).status, 422);
-    assertEquals((await w.call("PATCH", url, { auth: parent, body: { fields: { no_play_after: { value: "25:00" } } } })).status, 422);
+    assertEquals((await w.call("PATCH", url, { auth: parent, body: { fields: { bedtime: { value: "25:00" } } } })).status, 422);
     const doc = (await w.call("GET", url, { auth: parent })).body;
     const errs = (await import("../../supabase/functions/_shared/schema.ts")).schemaErrors(doc, (await import("../../supabase/functions/_shared/contract.ts")).SCHEMAS.settings_v1);
     assertEquals(errs, [], "the settings document matches the contract");
