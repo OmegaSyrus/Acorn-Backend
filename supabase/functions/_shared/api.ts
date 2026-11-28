@@ -4,7 +4,8 @@
 import { ApiError, body, CORS, errorResponse, json, need } from "./http.ts";
 import type { Deps, Sql } from "./deps.ts";
 import { schemaErrors } from "./schema.ts";
-import { SCHEMAS } from "./contract.ts";
+import { SCHEMAS, SKILL_LABELS } from "./contract.ts";
+import { type ChildReport, gameReport, safeTz, weeklyEmail } from "./report.ts";
 
 // deno-lint-ignore no-explicit-any
 type Row = Record<string, any>;
@@ -513,21 +514,18 @@ const MAX_RECORD_LINES = 5000;
  * profile that is mapped to the child now (so lines sent before the mapping
  * count too), newest first. Guest lines never reach the server.
  */
-async function getRecords(req: Request, d: Deps, url: URL, childId: string, game: string): Promise<Response> {
-  const a = await childAccess(req, d, childId);
-  if (!a.parent) throw new ApiError("forbidden", "play records are for parents");
-  need(GAME.test(game), "bad game id");
-  const days = Number(url.searchParams.get("days") ?? "30");
-  need(Number.isInteger(days) && days >= 1 && days <= MAX_RECORD_DAYS, `days: 1 to ${MAX_RECORD_DAYS}`);
-  const limit = Number(url.searchParams.get("limit") ?? "2000");
-  need(Number.isInteger(limit) && limit >= 1 && limit <= MAX_RECORD_LINES, `limit: 1 to ${MAX_RECORD_LINES}`);
+/**
+ * One child's play log lines for one game, from batches received since
+ * `since`: every line from a profile mapped to the child now (so lines sent
+ * before the mapping count too), newest first. Guest lines never reach the server.
+ */
+async function childLines(d: Deps, familyId: string, childId: string, game: string, since: Date, limit: number): Promise<{ lines: Row[]; truncated: boolean }> {
   const mine = await d.sql`select p.dev, p.profile from device_profiles p join devices v on v.id = p.dev
-    where p.child_id = ${childId} and v.family_id = ${a.familyId}`;
+    where p.child_id = ${childId} and v.family_id = ${familyId}`;
   const keys = new Set(mine.map((r: Row) => `${r.dev}/${r.profile}`));
   const devs = [...new Set(mine.map((r: Row) => r.dev as string))];
-  const since = new Date(d.now() - days * 86400 * 1000);
   const uploads = devs.length
-    ? await d.sql`select dev, path from uploads where family_id = ${a.familyId} and game = ${game}
+    ? await d.sql`select dev, path from uploads where family_id = ${familyId} and game = ${game}
         and dev in ${d.sql(devs)} and received_at >= ${since} order by received_at desc, last_seq desc`
     : [];
   const out: Row[] = [];
@@ -557,7 +555,174 @@ async function getRecords(req: Request, d: Deps, url: URL, childId: string, game
     if (truncated) break;
   }
   out.sort((x, y) => (y.t ?? 0) - (x.t ?? 0) || (y.seq ?? 0) - (x.seq ?? 0));
-  return json({ child: childId, game, days, lines: out, truncated });
+  return { lines: out, truncated };
+}
+
+async function getRecords(req: Request, d: Deps, url: URL, childId: string, game: string): Promise<Response> {
+  const a = await childAccess(req, d, childId);
+  if (!a.parent) throw new ApiError("forbidden", "play records are for parents");
+  need(GAME.test(game), "bad game id");
+  const days = Number(url.searchParams.get("days") ?? "30");
+  need(Number.isInteger(days) && days >= 1 && days <= MAX_RECORD_DAYS, `days: 1 to ${MAX_RECORD_DAYS}`);
+  const limit = Number(url.searchParams.get("limit") ?? "2000");
+  need(Number.isInteger(limit) && limit >= 1 && limit <= MAX_RECORD_LINES, `limit: 1 to ${MAX_RECORD_LINES}`);
+  const since = new Date(d.now() - days * 86400 * 1000);
+  const { lines, truncated } = await childLines(d, a.familyId, childId, game, since, limit);
+  return json({ child: childId, game, days, lines, truncated });
+}
+
+// ------------------------------------------------------------------ reports
+
+const MAX_REPORT_LINES = 20000;
+
+/** The games a child has anything in: a device of theirs, or a save snapshot. */
+async function childGames(d: Deps, familyId: string, childId: string): Promise<string[]> {
+  const rows = await d.sql`select distinct v.game from device_profiles p join devices v on v.id = p.dev
+      where p.child_id = ${childId} and v.family_id = ${familyId}
+    union select distinct game from snapshots where child_id = ${childId} order by 1`;
+  return rows.map((r: Row) => r.game as string);
+}
+
+async function latestManifest(d: Deps, game: string): Promise<Row | null> {
+  const [m] = await d.sql`select body from manifests where game = ${game} order by code desc limit 1`;
+  return m?.body ?? null;
+}
+
+async function snapshotBodies(d: Deps, childId: string, game: string): Promise<Row[]> {
+  const rows = await d.sql`select path from snapshots where child_id = ${childId} and game = ${game}`;
+  const out: Row[] = [];
+  for (const r of rows) {
+    const raw = await d.blobs.get(r.path);
+    if (raw) out.push(JSON.parse(new TextDecoder().decode(raw)));
+  }
+  return out;
+}
+
+/** A child's report for [from, to) in unix seconds: one section per game. */
+export async function childReport(d: Deps, familyId: string, childId: string, from: number, to: number): Promise<ChildReport & Row> {
+  const [c] = await d.sql`select id, nickname, birth_year, picture from children where id = ${childId} and family_id = ${familyId}`;
+  if (!c) throw new ApiError("not_found", "no such child in this family");
+  const games = [];
+  for (const game of await childGames(d, familyId, childId)) {
+    const { lines, truncated } = await childLines(d, familyId, childId, game, new Date(from * 1000), MAX_REPORT_LINES);
+    const inside = lines.filter((l) => typeof l.t === "number" && l.t >= from && l.t < to);
+    const r = gameReport(game, inside, await snapshotBodies(d, childId, game), await latestManifest(d, game), SKILL_LABELS);
+    games.push({ ...r, truncated });
+  }
+  return { child: c.id, nickname: c.nickname, birth_year: c.birth_year, picture: c.picture, from, to, games };
+}
+
+async function getReport(req: Request, d: Deps, url: URL, childId: string): Promise<Response> {
+  const a = await childAccess(req, d, childId);
+  if (!a.parent) throw new ApiError("forbidden", "reports are for parents");
+  const now = secs(d);
+  const q = (k: string) => url.searchParams.get(k);
+  let from: number, to: number;
+  if (q("from") !== null || q("to") !== null) {
+    from = Number(q("from"));
+    to = Number(q("to") ?? now);
+    need(Number.isInteger(from) && Number.isInteger(to) && to > from, "from and to: unix seconds, to after from");
+    need(to - from <= MAX_RECORD_DAYS * 86400, `at most ${MAX_RECORD_DAYS} days`);
+  } else {
+    const days = Number(q("days") ?? "7");
+    need(Number.isInteger(days) && days >= 1 && days <= MAX_RECORD_DAYS, `days: 1 to ${MAX_RECORD_DAYS}`);
+    to = now;
+    from = now - days * 86400;
+  }
+  return json(await childReport(d, a.familyId, childId, from, to));
+}
+
+// ------------------------------------------------------------------ the weekly email
+
+const WEEK = 7 * 86400;
+const TEST_GAP_SECS = 600;
+
+async function familyReports(d: Deps, familyId: string, from: number, to: number): Promise<ChildReport[]> {
+  const kids = await d.sql`select id from children where family_id = ${familyId} order by created_at`;
+  const out: ChildReport[] = [];
+  for (const k of kids) out.push(await childReport(d, familyId, k.id, from, to));
+  return out;
+}
+
+async function emailFor(d: Deps, familyId: string): Promise<{ subject: string; text: string; html: string }> {
+  const [f] = await d.sql`select tz, warned_at from families where id = ${familyId}`;
+  const to = secs(d);
+  const from = to - WEEK;
+  return weeklyEmail({ children: await familyReports(d, familyId, from, to), from, to, tz: safeTz(f?.tz), appUrl: d.appUrl, warnIdle: !!f?.warned_at });
+}
+
+async function adultEmail(d: Deps, userId: string): Promise<string | null> {
+  const [u] = await d.sql`select email from auth.users where id = ${userId}`;
+  return typeof u?.email === "string" && u.email.includes("@") ? u.email : null;
+}
+
+async function getMe(req: Request, d: Deps): Promise<Response> {
+  const p = await familyParent(req, d);
+  const [a] = await d.sql`select a.weekly_email, a.weekly_sent_at, f.tz from adults a join families f on f.id = a.family_id where a.user_id = ${p.userId}`;
+  return json({ role: p.role, email: await adultEmail(d, p.userId), weekly_email: a.weekly_email, weekly_sent_at: a.weekly_sent_at, tz: a.tz, mail_on: !!d.mail });
+}
+
+async function patchMe(req: Request, d: Deps): Promise<Response> {
+  const p = await familyParent(req, d);
+  const b = await body(req);
+  if ("weekly_email" in b) {
+    need(typeof b.weekly_email === "boolean", "weekly_email: true or false");
+    await d.sql`update adults set weekly_email = ${b.weekly_email} where user_id = ${p.userId}`;
+  }
+  if ("tz" in b) {
+    need(typeof b.tz === "string" && b.tz.length <= 64 && safeTz(b.tz) === b.tz, "tz: a time zone like America/Toronto");
+    await d.sql`update families set tz = ${b.tz} where id = ${p.familyId}`;
+  }
+  return await getMe(new Request(req.url, { headers: req.headers }), d);
+}
+
+async function previewWeekly(req: Request, d: Deps): Promise<Response> {
+  const p = await familyParent(req, d);
+  return json(await emailFor(d, p.familyId));
+}
+
+async function testWeekly(req: Request, d: Deps): Promise<Response> {
+  const p = await familyParent(req, d);
+  if (!d.mail) throw new ApiError("conflict", "email sending is not set up on this server yet", { reason: "mail_off" });
+  const to = await adultEmail(d, p.userId);
+  if (!to) throw new ApiError("conflict", "your sign-in has no email address", { reason: "no_email" });
+  const [a] = await d.sql`select test_sent_at from adults where user_id = ${p.userId}`;
+  if (a?.test_sent_at && secs(d) - Math.floor(new Date(a.test_sent_at).getTime() / 1000) < TEST_GAP_SECS) {
+    throw new ApiError("rate_limited", "one test email every 10 minutes");
+  }
+  const m = await emailFor(d, p.familyId);
+  await d.mail({ to, ...m });
+  await d.sql`update adults set test_sent_at = ${nowTs(d)} where user_id = ${p.userId}`;
+  return json({ sent: true, to });
+}
+
+/** The scheduled weekly job: every adult with the email on, once a week. */
+export async function weekly(d: Deps): Promise<Row> {
+  const due = new Date(d.now() - (WEEK - 6 * 3600) * 1000); // a little slack for the cron's own drift
+  const rows = await d.sql`select a.user_id, a.family_id from adults a
+    where a.weekly_email and (a.weekly_sent_at is null or a.weekly_sent_at < ${due})
+      and exists (select 1 from children c where c.family_id = a.family_id)
+    order by a.family_id`;
+  if (!d.mail) return { mail_on: false, due: rows.length, sent: 0, failed: 0 };
+  let sent = 0, failed = 0, noEmail = 0;
+  const cache = new Map<string, { subject: string; text: string; html: string }>();
+  for (const r of rows) {
+    const to = await adultEmail(d, r.user_id);
+    if (!to) {
+      noEmail++;
+      continue;
+    }
+    try {
+      if (!cache.has(r.family_id)) cache.set(r.family_id, await emailFor(d, r.family_id));
+      await d.mail({ to, ...cache.get(r.family_id)! });
+      await d.sql`update adults set weekly_sent_at = ${nowTs(d)} where user_id = ${r.user_id}`;
+      sent++;
+    } catch (e) {
+      console.error("weekly email", r.user_id, e);
+      failed++;
+    }
+  }
+  return { mail_on: true, due: rows.length, sent, failed, no_email: noEmail };
 }
 
 // ------------------------------------------------------------------ snapshots
@@ -748,6 +913,11 @@ export async function handle(req: Request, d: Deps): Promise<Response> {
       need(r, "range: first-last");
       return await putEvents(req, d, a[0], a[1], Number(r[1]), Number(r[2]));
     }
+    if ((a = route("GET", "/family/me"))) return await getMe(req, d);
+    if ((a = route("PATCH", "/family/me"))) return await patchMe(req, d);
+    if ((a = route("GET", "/family/weekly-email"))) return await previewWeekly(req, d);
+    if ((a = route("POST", "/family/weekly-email/test"))) return await testWeekly(req, d);
+    if ((a = route("GET", "/children/:c/report"))) return await getReport(req, d, url, a[0]);
     if ((a = route("GET", "/children/:c/games/:g/records"))) return await getRecords(req, d, url, a[0], a[1]);
     if ((a = route("GET", "/children/:c/games/:g/snapshots"))) return await getSnapshots(req, d, a[0], a[1]);
     if ((a = route("PUT", "/children/:c/games/:g/snapshots/:dev"))) return await putSnapshot(req, d, a[0], a[1], a[2]);
@@ -762,6 +932,11 @@ export async function handle(req: Request, d: Deps): Promise<Response> {
       const key = authHeader(req, "Cron");
       if (!d.cronKey || key !== d.cronKey) throw new ApiError("unauthorized", "cron key");
       return json(await retention(d));
+    }
+    if ((a = route("POST", "/admin/weekly"))) {
+      const key = authHeader(req, "Cron");
+      if (!d.cronKey || key !== d.cronKey) throw new ApiError("unauthorized", "cron key");
+      return json(await weekly(d));
     }
     throw new ApiError("not_found", `no route ${m} /v1${path}`);
   } catch (e) {

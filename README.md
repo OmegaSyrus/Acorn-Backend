@@ -16,8 +16,8 @@ event batches and snapshots, and one Edge Function as our own `/v1` API.
 | `tools/` | Contract sample checker, generator for the function's copy of the schemas |
 | `docs/deploy.md` | Setting up staging and production |
 
-Coming in later threads: `web/` (the parent app) and `godot-addon/` (the
-sync add-on each game copies in).
+`web/` is the parent app (GitHub Pages). The game's sync add-on lives in the
+game repository.
 
 ## What it does today
 
@@ -33,6 +33,11 @@ sync add-on each game copies in).
 - Export everything as JSON; delete a child or the whole family, storage
   included; retention deletes event batches 24 months after a child's last
   play and idle families after a warning.
+- Reports per child with one section per game: time played, right and slow
+  sums, levels finished, worlds complete, sessions. The parent app shows them,
+  prints them as a homeschool record, and a weekly email sends them (once a
+  mail account is set up, see `docs/deploy.md`).
+- Controls are only what each game's manifest offers (time limits).
 - No remote Level or world unlock: parents don't move children through a game.
 
 ## Running the tests

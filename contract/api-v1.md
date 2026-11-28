@@ -45,6 +45,11 @@ GET    /v1/devices/{dev}/profiles                               the device itsel
 PUT    /v1/devices/{dev}/profiles      {profiles: [...]}        the device itself
 PUT    /v1/events/{game}/{dev}/{first_seq}-{last_seq}           the device itself
 GET    /v1/children/{child}/games/{game}/records?days=&limit=   parent: the child's play log lines
+GET    /v1/children/{child}/report?days= | ?from=&to=           parent: the child's report, one section per game
+GET    /v1/family/me                                            parent: my weekly email setting, the family's time zone
+PATCH  /v1/family/me                   {weekly_email?, tz?}     parent
+GET    /v1/family/weekly-email                                  parent: this week's email, to look at
+POST   /v1/family/weekly-email/test                             parent: send it to me now (one per 10 minutes)
 GET    /v1/children/{child}/games/{game}/snapshots              device or parent of the family
 PUT    /v1/children/{child}/games/{game}/snapshots/{dev}        the device itself
 GET    /v1/children/{child}/games/{game}/settings               device or parent
@@ -52,10 +57,11 @@ PATCH  /v1/children/{child}/games/{game}/settings               device, owner or
 PUT    /v1/games/{game}/manifests/{code}                        publisher
 GET    /v1/games/{game}/manifests/{code|latest}                 anyone
 POST   /v1/admin/retention                                      cron
+POST   /v1/admin/weekly                                         cron: the weekly email
 ```
 
 Later (threads 5 to 8): `POST /v1/family/invites` (second adult),
-`GET /v1/children/{child}/games/{game}/report`, `POST /v1/devices/join/{provider}`
+`POST /v1/devices/join/{provider}`
 (Steam or Xbox silent join).
 
 ## Family and consent
@@ -125,6 +131,38 @@ of the family only; `days` 1 to 400, `limit` 1 to 5000) answers
 profile mapped to the child now, from batches received in the window,
 newest first. A profile mapped after its lines were sent counts from then
 on. The parent web app builds its summary from these lines.
+
+## Reports (added 2026-11-28)
+
+`GET /v1/children/{child}/report?days=7` (or `?from=<unix s>&to=<unix s>`,
+at most 400 days; parents only) answers
+`{child, nickname, birth_year, picture, from, to, games: [...]}`, one entry
+per game the child has a tablet or a save in. Each game entry has `title`,
+`minutes`, `days_played`, `answers`, `right`, `right_pct`, `avg_secs`,
+`slow_secs`, `slow`, `levels_cleared`, `fights_won`, `bosses_won`,
+`restarts`, `by_skill` (`skill`, `label`, `tries`, `right`, `right_pct`,
+`avg_secs`), `by_where`, `practice` (sums missed or right but slow, worst
+first: `q`, `skill`, `tries`, `missed`, `slow`, `avg_secs`), `sessions`
+(newest first: `start`, `end`, `minutes`, `answers`, `right`, `worlds`),
+`cleared` (levels finished in the period, `label` and `num` from the
+manifest) and `progress` (all time, from the save snapshots of every device:
+`level_setting`, `worlds` with `done`, `total`, `stars`, `complete`, and
+`worlds_complete`; `null` before any snapshot). A session is broken by a
+10-minute gap or another device; slow is at least 8 s and at least twice the
+child's median time. The parent app's report, the printable record and the
+weekly email all use it.
+
+## Weekly email (added 2026-11-28)
+
+Each adult turns it on or off with `PATCH /v1/family/me {"weekly_email": false}`
+(on by default); `tz` (an IANA zone such as `America/Toronto`, set by the
+parent app from the browser) is the family's. `POST /v1/admin/weekly` (cron,
+weekly) sends each adult with it on, whose family has a child, the last 7
+days of every child, every game, at most once in 6 days and 18 hours. It also
+carries the idle-family warning the retention job raises. Until the server
+has a mail account (`RESEND_API_KEY` and `ACORN_MAIL_FROM`) nothing sends:
+the job answers `{mail_on: false, due}` and the test call `409 {reason: "mail_off"}`,
+while the preview still works.
 
 ## Snapshots
 

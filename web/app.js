@@ -18,7 +18,6 @@ const LEGACY = {
 };
 export const PICTURES = { ids: [], labels: {} };
 const NAME_MAX = 12; // the game's limit; the server allows 24
-const WORLDS = { lava_caves: "Lava Caves", crystal_mines: "Crystal Mines", bog: "the Bog", mushroom_forest: "Mushroom Forest", space: "Space" };
 const WHERE = { stone: "Stepping stones", fight: "Fights", duel: "Miniboss duels", boss: "Boss fights" };
 const PENDING_PAIR = "acorn.pendingPair";
 
@@ -184,6 +183,8 @@ function render() {
   if (state.family === null) return (app.innerHTML = `<p class="muted">Loading…</p>${msg}`);
   if (state.family === "none") return consentView(msg);
   if (state.view === "records" && state.child) return recordsView(msg);
+  if (state.view === "print" && state.child) return printView(msg);
+  if (state.view === "controls" && state.child) return controlsView(msg);
   return homeView(msg);
 }
 
@@ -273,7 +274,9 @@ function homeView(msg) {
               <b>${esc(c.nickname)}</b>${c.birth_year ? ` <span class="muted small">born ${esc(c.birth_year)}</span>` : ""}<br>
               <span class="muted small">Last played: ${when(c.last_play_at)}</span>
             </div>
-            <button data-act="records">Play records</button>
+            <button data-act="records">Report</button>
+            <button class="ghost" data-act="print">Print record</button>
+            <button class="ghost" data-act="controls">Controls</button>
             ${canEdit ? `<button class="ghost" data-act="edit">Edit</button>` : ""}
             ${f.role === "owner" ? `<button class="danger" data-act="delete">Remove</button>` : ""}
           </div>`).join("") : `<p class="muted">No children yet. Add one below, then add their tablet.</p>`}
@@ -314,6 +317,11 @@ function homeView(msg) {
     </div>
 
     <div class="card">
+      <h2>Weekly email</h2>
+      <div id="weekly"><p class="muted">Loading…</p></div>
+    </div>
+
+    <div class="card">
       <h2>Your data</h2>
       <p class="muted small">You are the family's ${esc(f.role)}. Records are kept 24 months after a child last plays.</p>
       <div class="row">
@@ -327,8 +335,8 @@ function homeView(msg) {
     const c = f.children.find((x) => x.child === id);
     el.querySelectorAll("button").forEach((b) => (b.onclick = async () => {
       const act = b.dataset.act;
-      if (act === "records") {
-        state.view = "records";
+      if (act === "records" || act === "print" || act === "controls") {
+        state.view = act;
         state.child = id;
         state.msg = null;
         return render();
@@ -421,6 +429,7 @@ function homeView(msg) {
       flash(e.message, true);
     }
   };
+  emailCard();
 }
 
 function editChild(el, c) {
@@ -451,117 +460,329 @@ function editChild(el, c) {
   };
 }
 
-// ------------------------------------------------------------ play records
+// ------------------------------------------------------------ reports
+// The numbers come from GET /v1/children/{child}/report (one section per
+// game), the same report the weekly email and the printed record use.
 
-/** Splits lines into play sessions: a gap of more than 10 minutes starts a new one. */
-export function sessions(lines) {
-  const sorted = [...lines].filter((l) => typeof l.t === "number").sort((a, b) => a.t - b.t || (a.seq ?? 0) - (b.seq ?? 0));
-  const out = [];
-  for (const l of sorted) {
-    const cur = out[out.length - 1];
-    if (!cur || l.t - cur.end > 600 || l.dev !== cur.dev) out.push({ start: l.t, end: l.t, dev: l.dev, lines: [l] });
-    else {
-      cur.end = l.t;
-      cur.lines.push(l);
-    }
-  }
-  return out.reverse();
+const RANGES = [[7, "7 days"], [30, "30 days"], [90, "90 days"], [365, "Year"]];
+
+function mins(m) {
+  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
+}
+function clock(t) {
+  return new Date(t * 1000).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+function bar(p) {
+  return `<div class="row"><div class="bar grow"><i style="width:${p}%"></i></div>${p}%</div>`;
+}
+function plural(n, one, many = one + "s") {
+  return `${n} ${n === 1 ? one : many}`;
 }
 
-export function summarize(lines) {
-  const answers = lines.filter((l) => l.kind === "answer");
-  const right = answers.filter((l) => l.right).length;
-  const bySkill = {};
-  const byWhere = {};
-  for (const a of answers) {
-    const s = (bySkill[a.skill ?? "unknown"] ??= { n: 0, right: 0, secs: 0 });
-    s.n++;
-    s.right += a.right ? 1 : 0;
-    s.secs += Number(a.secs) || 0;
-    const w = (byWhere[a.where ?? "other"] ??= { n: 0, right: 0 });
-    w.n++;
-    w.right += a.right ? 1 : 0;
-  }
-  const ses = sessions(lines);
-  const minutes = ses.reduce((m, s) => m + Math.max(1, Math.round((s.end - s.start) / 60)), 0);
-  const days = new Set(lines.filter((l) => l.t).map((l) => new Date(l.t * 1000).toDateString())).size;
-  const ev = (name) => lines.filter((l) => l.kind === "event" && l.event === name).length;
-  return {
-    answers: answers.length, right, minutes, days, sessions: ses, bySkill, byWhere,
-    cleared: ev("level_cleared"), fights: ev("fight_won"), bosses: ev("boss_won"), restarts: ev("restart"),
-  };
+function childNav(c, active) {
+  const tabs = [["records", "Report"], ["print", "Printable record"], ["controls", "Controls"]];
+  return `
+    <p><button class="ghost noprint" id="back">← Back</button></p>
+    <div class="row noprint" style="margin-bottom:10px"><div class="pic">${pic(c.picture)}</div><h2 class="grow" style="margin:0">${esc(c.nickname)}</h2></div>
+    <div class="tabs noprint">${tabs.map(([v, l]) => `<button class="${v === active ? "" : "ghost"}" data-view="${v}">${l}</button>`).join("")}</div>`;
 }
-
-async function recordsView(msg) {
-  const c = state.family.children.find((x) => x.child === state.child);
-  if (!c) {
-    state.view = "home";
-    return render();
-  }
-  app.innerHTML = `
-    <p><button class="ghost" id="back">← Back</button></p>
-    <div class="card">
-      <div class="row"><div class="pic">${pic(c.picture)}</div><h2 class="grow" style="margin:0">${esc(c.nickname)}'s play records</h2></div>
-      <div class="tabs" style="margin-top:10px">
-        ${[7, 30, 90, 365].map((d) => `<button class="${d === state.days ? "" : "ghost"}" data-days="${d}">${d === 365 ? "Year" : `${d} days`}</button>`).join("")}
-      </div>
-      <div id="rec"><p class="muted">Loading…</p></div>
-    </div>${msg}`;
+function wireNav() {
   document.getElementById("back").onclick = () => {
     state.view = "home";
     state.msg = null;
     render();
   };
+  app.querySelectorAll("[data-view]").forEach((b) => (b.onclick = () => {
+    state.view = b.dataset.view;
+    state.msg = null;
+    render();
+  }));
+}
+function currentChild() {
+  const c = state.family.children.find((x) => x.child === state.child);
+  if (!c) {
+    state.view = "home";
+    render();
+  }
+  return c;
+}
+
+/** One game's numbers: tiles, progress, skills, sums to practise. Shared by the report and the print page. */
+function gameSection(g, { print = false } = {}) {
+  const p = g.progress;
+  const worlds = p?.worlds?.length ? `
+    <h3>Worlds</h3>
+    <div class="scroll"><table><tr><th>World</th><th>Levels done</th><th>Stars</th><th></th></tr>
+    ${p.worlds.map((w) => `<tr><td>${esc(w.label)}</td><td>${w.done} of ${w.total}</td><td>${w.stars}</td><td>${w.complete ? `<span class="ok">Complete</span>` : ""}</td></tr>`).join("")}
+    </table></div>` : `<p class="muted small">World progress shows once the tablet has backed up this child's save.</p>`;
+  const skills = g.by_skill.length ? `
+    <h3>Skills practised</h3>
+    <div class="scroll"><table><tr><th>Skill</th><th>Tries</th><th>Right first time</th><th>Average time</th></tr>
+    ${g.by_skill.map((s) => `<tr><td>${esc(s.label)}</td><td>${s.tries}</td><td>${print ? `${s.right_pct}%` : bar(s.right_pct)}</td><td>${s.avg_secs} s</td></tr>`).join("")}
+    </table></div>` : "";
+  const practice = g.practice.length ? `
+    <h3>Sums to practise</h3>
+    <p class="muted small">Missed at least once, or right but slow (${g.slow_secs} s or more).</p>
+    <div class="scroll"><table><tr><th>Sum</th><th>Tries</th><th>Missed</th><th>Slow</th><th>Average time</th></tr>
+    ${g.practice.map((x) => `<tr><td><b>${esc(x.q)}</b></td><td>${x.tries}</td><td>${x.missed}</td><td>${x.slow}</td><td>${x.avg_secs} s</td></tr>`).join("")}
+    </table></div>` : "";
+  const cleared = g.cleared.length ? `<p><b>Levels finished:</b> ${esc(g.cleared.map((l) => `${l.label}${l.num ? ` ${l.num}` : ""}`).join(", "))}</p>` : "";
+  return `
+    <div class="stats">
+      <div class="stat"><b>${mins(g.minutes)}</b>played over ${plural(g.days_played, "day")}</div>
+      <div class="stat"><b>${g.answers}</b>questions answered</div>
+      <div class="stat"><b>${g.right_pct}%</b>right first time</div>
+      <div class="stat"><b>${g.levels_cleared}</b>levels finished</div>
+      <div class="stat"><b>${g.fights_won + g.bosses_won}</b>fights and bosses won</div>
+      ${p?.level_setting ? `<div class="stat"><b>Level ${p.level_setting}</b>the game's Level now</div>` : ""}
+    </div>
+    ${p?.worlds_complete?.length ? `<p><b>Worlds complete:</b> ${esc(p.worlds_complete.join(", "))}</p>` : ""}
+    ${cleared}${worlds}${skills}${practice}`;
+}
+
+async function recordsView(msg) {
+  const c = currentChild();
+  if (!c) return;
+  app.innerHTML = `${childNav(c, "records")}
+    <div class="card">
+      <div class="tabs">${RANGES.map(([d, l]) => `<button class="${d === state.days ? "" : "ghost"}" data-days="${d}">${l}</button>`).join("")}</div>
+      <div id="rec"><p class="muted">Loading…</p></div>
+    </div>${msg}`;
+  wireNav();
   app.querySelectorAll("[data-days]").forEach((b) => (b.onclick = () => {
     state.days = Number(b.dataset.days);
     render();
   }));
   const box = document.getElementById("rec");
-  let data;
+  let rep, rec;
   try {
-    data = await api("GET", `/children/${c.child}/games/${CONFIG.game}/records?days=${state.days}&limit=5000`);
+    rep = await api("GET", `/children/${c.child}/report?days=${state.days}`);
+    rec = await api("GET", `/children/${c.child}/games/${CONFIG.game}/records?days=${state.days}&limit=200`).catch(() => ({ lines: [] }));
   } catch (e) {
     box.innerHTML = `<div class="msg err">${esc(e.message)}</div>`;
     return;
   }
   if (state.view !== "records" || state.child !== c.child) return;
-  const lines = data.lines;
-  if (!lines.length) {
+  const played = rep.games.filter((g) => g.answers || g.minutes || g.progress);
+  if (!played.length) {
     box.innerHTML = `<p class="muted">Nothing yet in this time. Records show up after ${esc(c.nickname)} plays on a tablet in your family, with their player picked on the tablet.</p>`;
     return;
   }
-  const s = summarize(lines);
-  const skillRows = Object.entries(s.bySkill).sort((a, b) => b[1].n - a[1].n).map(([id, v]) => `
-    <tr><td>${esc(state.skills[id] ?? id)}</td><td>${v.n}</td>
-    <td><div class="row"><div class="bar grow"><i style="width:${pct(v.right, v.n)}%"></i></div>${pct(v.right, v.n)}%</div></td>
-    <td>${v.n ? (v.secs / v.n).toFixed(1) : "-"} s</td></tr>`).join("");
-  const whereRows = Object.entries(s.byWhere).map(([k, v]) => `<tr><td>${esc(WHERE[k] ?? k)}</td><td>${v.n}</td><td>${pct(v.right, v.n)}%</td></tr>`).join("");
-  const sesRows = s.sessions.slice(0, 20).map((x) => {
-    const a = x.lines.filter((l) => l.kind === "answer");
-    const worlds = [...new Set(x.lines.map((l) => WORLDS[l.world] ?? l.world).filter(Boolean))].join(", ");
-    return `<tr><td>${day(x.start)} ${new Date(x.start * 1000).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</td>
-      <td>${Math.max(1, Math.round((x.end - x.start) / 60))} min</td><td>${a.length}</td><td>${pct(a.filter((l) => l.right).length, a.length)}%</td><td>${esc(worlds)}</td></tr>`;
-  }).join("");
-  const recent = lines.filter((l) => l.kind === "answer").slice(0, 40).map((l) => `
+  const recent = rec.lines.filter((l) => l.kind === "answer").slice(0, 30).map((l) => `
     <tr><td>${new Date(l.t * 1000).toLocaleString(undefined, { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" })}</td><td>${esc(WHERE[l.where] ?? l.where ?? "")}</td><td>${esc(l.q ?? "")}</td>
     <td>${esc(l.pick)}</td><td>${esc(l.answer)}</td><td>${l.right ? `<span class="ok">✓</span>` : `<span class="no">✗</span>`}</td><td>${esc(l.secs)} s</td></tr>`).join("");
-  box.innerHTML = `
-    <div class="stats">
-      <div class="stat"><b>${s.answers}</b>questions answered</div>
-      <div class="stat"><b>${pct(s.right, s.answers)}%</b>right first time</div>
-      <div class="stat"><b>${s.minutes} min</b>played over ${s.days} day${s.days === 1 ? "" : "s"}</div>
-      <div class="stat"><b>${s.cleared}</b>levels cleared</div>
-      <div class="stat"><b>${s.fights + s.bosses}</b>fights and bosses won</div>
+  box.innerHTML = played.map((g) => `
+    <section class="game">
+      ${rep.games.length > 1 ? `<h2>${esc(g.title)}</h2>` : ""}
+      ${gameSection(g)}
+      <h3>Play sessions</h3>
+      <div class="scroll"><table><tr><th>When</th><th>Length</th><th>Questions</th><th>Right</th><th>Worlds</th></tr>
+      ${g.sessions.slice(0, 20).map((x) => `<tr><td>${day(x.start)} ${clock(x.start)}</td><td>${x.minutes} min</td><td>${x.answers}</td><td>${pct(x.right, x.answers)}%</td><td>${esc(x.worlds.join(", "))}</td></tr>`).join("")}
+      </table></div>
+      ${g.truncated ? `<p class="muted small">This was a lot of play: only the newest records are counted.</p>` : ""}
+    </section>`).join("<hr>") + (recent ? `
+    <h3>Latest answers</h3>
+    <div class="scroll"><table><tr><th>When</th><th>Where</th><th>Question</th><th>Picked</th><th>Answer</th><th></th><th>Time</th></tr>${recent}</table></div>` : "");
+}
+
+// ------------------------------------------------------------ printable record
+
+function dateInput(t) {
+  const d = new Date(t * 1000);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+/** Local midnight of a yyyy-mm-dd, in unix seconds. */
+function fromInput(v) {
+  const [y, m, d] = v.split("-").map(Number);
+  return Math.floor(new Date(y, m - 1, d).getTime() / 1000);
+}
+
+async function printView(msg) {
+  const c = currentChild();
+  if (!c) return;
+  const today = Math.floor(Date.now() / 1000);
+  state.printFrom ??= dateInput(today - 29 * 86400);
+  state.printTo ??= dateInput(today);
+  app.innerHTML = `${childNav(c, "print")}
+    <div class="card noprint">
+      <p class="muted small">A record of ${esc(c.nickname)}'s maths play for a homeschool file: dates, time spent, skills practised and levels finished. Pick the dates, then print or save as PDF.</p>
+      <form id="range" class="row">
+        <label class="small">From <input type="date" id="pf" value="${esc(state.printFrom)}" required></label>
+        <label class="small">To <input type="date" id="pt" value="${esc(state.printTo)}" required></label>
+        <button class="ghost">Show</button>
+        <button type="button" id="doprint">Print or save as PDF</button>
+      </form>
     </div>
-    ${data.truncated ? `<p class="muted small">Showing the newest ${lines.length} records only.</p>` : ""}
-    <h2 style="margin-top:16px">By skill</h2>
-    <div class="scroll"><table><tr><th>Skill</th><th>Tries</th><th>Right</th><th>Average time</th></tr>${skillRows}</table></div>
-    <h2 style="margin-top:16px">Where</h2>
-    <div class="scroll"><table><tr><th>Part of the game</th><th>Tries</th><th>Right</th></tr>${whereRows}</table></div>
-    <h2 style="margin-top:16px">Play sessions</h2>
-    <div class="scroll"><table><tr><th>When</th><th>Length</th><th>Questions</th><th>Right</th><th>Worlds</th></tr>${sesRows}</table></div>
-    <h2 style="margin-top:16px">Latest answers</h2>
-    <div class="scroll"><table><tr><th>When</th><th>Where</th><th>Question</th><th>Picked</th><th>Answer</th><th></th><th>Time</th></tr>${recent}</table></div>`;
+    ${msg}
+    <div class="card printable" id="sheet"><p class="muted">Loading…</p></div>`;
+  wireNav();
+  document.getElementById("range").onsubmit = (ev) => {
+    ev.preventDefault();
+    state.printFrom = document.getElementById("pf").value;
+    state.printTo = document.getElementById("pt").value;
+    render();
+  };
+  document.getElementById("doprint").onclick = () => window.print();
+  const from = fromInput(state.printFrom);
+  const to = fromInput(state.printTo) + 86400;
+  const sheet = document.getElementById("sheet");
+  if (!(to > from)) {
+    sheet.innerHTML = `<div class="msg err">The end date must be on or after the start date.</div>`;
+    return;
+  }
+  let rep;
+  try {
+    rep = await api("GET", `/children/${c.child}/report?from=${from}&to=${to}`);
+  } catch (e) {
+    sheet.innerHTML = `<div class="msg err">${esc(e.message)}</div>`;
+    return;
+  }
+  if (state.view !== "print" || state.child !== c.child) return;
+  const long = (t) => new Date(t * 1000).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+  const total = rep.games.reduce((m, g) => m + g.minutes, 0);
+  const daysPlayed = new Set(rep.games.flatMap((g) => g.sessions.map((s) => new Date(s.start * 1000).toDateString()))).size;
+  sheet.innerHTML = `
+    <div class="sheet-head">
+      <div>
+        <h2 style="margin:0">Maths learning record</h2>
+        <p style="margin:4px 0 0"><b>${esc(c.nickname)}</b>${c.birth_year ? ` · born ${esc(c.birth_year)}` : ""}</p>
+        <p class="muted small" style="margin:0">${esc(long(from))} to ${esc(long(to - 86400))}</p>
+      </div>
+      <div class="small muted" style="text-align:right">Acorn Mathematics<br>Printed ${esc(long(today))}</div>
+    </div>
+    <p><b>${mins(total)}</b> of play on <b>${plural(daysPlayed, "day")}</b> in this period.</p>
+    ${rep.games.map((g) => `
+      <section class="game">
+        <h2>${esc(g.title)}</h2>
+        ${g.answers || g.minutes ? gameSection(g, { print: true }) : `<p class="muted">No play in this period.</p>`}
+        ${g.sessions.length ? `
+        <h3>Sessions</h3>
+        <table><tr><th>Date</th><th>Start</th><th>Minutes</th><th>Questions</th><th>Right</th><th>Worlds</th></tr>
+        ${[...g.sessions].reverse().map((x) => `<tr><td>${day(x.start)}</td><td>${clock(x.start)}</td><td>${x.minutes}</td><td>${x.answers}</td><td>${pct(x.right, x.answers)}%</td><td>${esc(x.worlds.join(", "))}</td></tr>`).join("")}
+        </table>` : ""}
+      </section>`).join("") || `<p class="muted">No games played yet.</p>`}
+    <div class="sign">
+      <div>Notes<div class="line"></div><div class="line"></div></div>
+      <div class="row" style="gap:24px"><div class="grow">Parent or teacher<div class="line"></div></div><div style="width:30%">Date<div class="line"></div></div></div>
+    </div>`;
+}
+
+// ------------------------------------------------------------ controls
+// Only what the game's manifest offers (time limits and the like). Parents
+// never move a child through the game: no Level or world switch is ever here.
+
+async function controlsView(msg) {
+  const c = currentChild();
+  if (!c) return;
+  const f = state.family;
+  const canEdit = f.role === "owner" || f.role === "caregiver";
+  app.innerHTML = `${childNav(c, "controls")}<div id="ctl"><p class="muted">Loading…</p></div>${msg}`;
+  wireNav();
+  const games = [...new Set([CONFIG.game, ...f.devices.map((d) => d.game)])];
+  const parts = [];
+  for (const game of games) {
+    let m = null, doc = null;
+    try {
+      const r = await fetch(`${CONFIG.api}/games/${encodeURIComponent(game)}/manifests/latest`);
+      if (r.ok) m = await r.json();
+      doc = await api("GET", `/children/${c.child}/games/${encodeURIComponent(game)}/settings`);
+    } catch (e) {
+      parts.push(`<div class="card"><h2>${esc(m?.title ?? game)}</h2><div class="msg err">${esc(e.message)}</div></div>`);
+      continue;
+    }
+    const specs = (m?.settings ?? []).filter((s) => s.scope !== "device");
+    const devCodes = f.devices.filter((d) => d.game === game && d.code).map((d) => d.code);
+    const oldest = devCodes.length ? Math.min(...devCodes) : null;
+    const field = (s) => {
+      const cur = doc.fields[s.key]?.value ?? s.default;
+      const id = `set_${game}_${s.key}`;
+      const dis = !canEdit ? "disabled" : "";
+      let input;
+      if (s.type === "bool") input = `<input type="checkbox" id="${esc(id)}" ${cur ? "checked" : ""} ${dis}>`;
+      else if (s.type === "int") input = `<input type="number" id="${esc(id)}" value="${esc(cur)}" min="${esc(s.min ?? "")}" max="${esc(s.max ?? "")}" style="width:110px" ${dis}>`;
+      else if (s.type === "time") input = `<input type="time" id="${esc(id)}" value="${esc(cur ?? "")}" ${dis}> <span class="muted small">empty = none</span>`;
+      else input = `<select id="${esc(id)}" ${dis}>${(s.options ?? []).map((o) => `<option ${o === cur ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>`;
+      const old = oldest !== null && s.since_code > oldest ? `<br><span class="muted small">A tablet has an older version of the game: update it to use this.</span>` : "";
+      return `<div class="item"><div class="grow"><label for="${esc(id)}"><b>${esc(s.label)}</b></label>${s.help ? `<br><span class="muted small">${esc(s.help)}</span>` : ""}${old}</div>${input}</div>`;
+    };
+    parts.push(`<div class="card" data-game="${esc(game)}">
+      <h2>${esc(m?.title ?? game)}</h2>
+      ${specs.length ? `<form class="list">${specs.map(field).join("")}
+        ${canEdit ? `<div class="item"><button>Save</button><span class="muted small" data-saved></span></div>` : ""}</form>`
+        : `<p class="muted">This version of the game has no grown-up controls yet. Time limits arrive with the tablet update that links it to your family.</p>`}
+      <p class="muted small">Levels and worlds are never changed from here: ${esc(c.nickname)} moves through the game by playing.</p>
+    </div>`);
+    state.specs = { ...(state.specs ?? {}), [game]: specs };
+  }
+  if (state.view !== "controls" || state.child !== c.child) return;
+  document.getElementById("ctl").innerHTML = parts.join("");
+  app.querySelectorAll("[data-game] form").forEach((form) => (form.onsubmit = async (ev) => {
+    ev.preventDefault();
+    const game = form.closest("[data-game]").dataset.game;
+    const fields = {};
+    for (const s of state.specs[game]) {
+      const el = document.getElementById(`set_${game}_${s.key}`);
+      fields[s.key] = { value: s.type === "bool" ? el.checked : s.type === "int" ? Number(el.value) : s.type === "time" ? (el.value || null) : el.value };
+    }
+    try {
+      await api("PATCH", `/children/${c.child}/games/${encodeURIComponent(game)}/settings`, { fields });
+      form.querySelector("[data-saved]").textContent = "Saved. The tablet picks it up next time it connects.";
+    } catch (e) {
+      flash(e.message, true);
+    }
+  }));
+}
+
+// ------------------------------------------------------------ weekly email
+
+async function emailCard() {
+  const box = document.getElementById("weekly");
+  if (!box) return;
+  let me;
+  try {
+    me = await api("GET", "/family/me");
+  } catch (e) {
+    box.innerHTML = `<div class="msg err">${esc(e.message)}</div>`;
+    return;
+  }
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (!me.tz && tz) api("PATCH", "/family/me", { tz }).catch(() => {});
+  box.innerHTML = `
+    <label class="row"><input type="checkbox" id="wk" ${me.weekly_email ? "checked" : ""}>
+      <span>Email me a short report each week${me.email ? ` at <b>${esc(me.email)}</b>` : ""}</span></label>
+    ${me.mail_on ? "" : `<p class="muted small">Sending is not switched on for this server yet. You can still see this week's email.</p>`}
+    <div class="row" style="margin-top:8px">
+      <button class="ghost" id="wkpv">See this week's email</button>
+      ${me.mail_on ? `<button class="ghost" id="wktest">Send it to me now</button>` : ""}
+    </div>
+    <div id="wkout"></div>`;
+  document.getElementById("wk").onchange = async (ev) => {
+    try {
+      await api("PATCH", "/family/me", { weekly_email: ev.target.checked });
+    } catch (e) {
+      flash(e.message, true);
+    }
+  };
+  document.getElementById("wkpv").onclick = async () => {
+    const out = document.getElementById("wkout");
+    out.innerHTML = `<p class="muted">Loading…</p>`;
+    try {
+      const m = await api("GET", "/family/weekly-email");
+      out.innerHTML = `<p class="small"><b>Subject:</b> ${esc(m.subject)}</p><iframe class="mail" sandbox title="This week's email"></iframe>`;
+      out.querySelector("iframe").srcdoc = m.html;
+    } catch (e) {
+      out.innerHTML = `<div class="msg err">${esc(e.message)}</div>`;
+    }
+  };
+  const t = document.getElementById("wktest");
+  if (t) t.onclick = async () => {
+    try {
+      const r = await api("POST", "/family/weekly-email/test");
+      document.getElementById("wkout").innerHTML = `<div class="msg">Sent to ${esc(r.to)}.</div>`;
+    } catch (e) {
+      document.getElementById("wkout").innerHTML = `<div class="msg err">${esc(e.message)}</div>`;
+    }
+  };
 }
 
 start();

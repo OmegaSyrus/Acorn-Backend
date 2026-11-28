@@ -24,6 +24,30 @@ export interface Deps {
   cronKey?: string;
   /** Where a pairing QR points, e.g. https://parents.example/pair (optional). */
   pairUrlBase?: string;
+  /** The parent web app's address, linked from emails (optional). */
+  appUrl?: string;
+  /** Sends one email (the weekly report). Unset: emails are previewed, never sent. */
+  mail?: (m: Mail) => Promise<void>;
+}
+
+export interface Mail {
+  to: string;
+  subject: string;
+  text: string;
+  html: string;
+}
+
+/** Sends through Resend's HTTP API (https://resend.com), from a verified sender. */
+export function resendMailer(apiKey: string, from: string) {
+  return async (m: Mail): Promise<void> => {
+    const r = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({ from, to: [m.to], subject: m.subject, text: m.text, html: m.html }),
+    });
+    if (!r.ok) throw new Error(`resend ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    await r.body?.cancel();
+  };
 }
 
 /** Files kept in memory (tests and local runs). */

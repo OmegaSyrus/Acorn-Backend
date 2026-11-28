@@ -476,3 +476,19 @@ export const SCHEMAS = {
  }
 } as const;
 export const SKILLS: string[] = ["count.to6","numeral.match.to6","add.within6","add.within10","add.within20","sub.within6","sub.within10","sub.within20","missing_addend.within10","missing_addend.within20","missing_subtrahend.within10","add3.within20","addsub3.within20","add.within40"];
+export const SKILL_LABELS: Record<string, string> = {
+ "count.to6": "Count the dots on one die",
+ "numeral.match.to6": "Match a number to a die face",
+ "add.within6": "Add two numbers, total up to 6",
+ "add.within10": "Add two numbers, total up to 10",
+ "add.within20": "Add two numbers, total up to 20",
+ "sub.within6": "Take away, from up to 6",
+ "sub.within10": "Take away, from up to 10",
+ "sub.within20": "Take away, from up to 20",
+ "missing_addend.within10": "Find the missing number: 3 + ? = 7, total up to 10",
+ "missing_addend.within20": "Find the missing number, total up to 20",
+ "missing_subtrahend.within10": "Find what was taken away: 6 - ? = 2",
+ "add3.within20": "Add three or more numbers, total up to 20",
+ "addsub3.within20": "Add and take away with three or more numbers",
+ "add.within40": "Add onto a bigger number, total up to 40"
+};

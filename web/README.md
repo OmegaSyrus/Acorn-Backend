@@ -5,7 +5,12 @@ Plain HTML and JavaScript, no build step (parent app plan v2, thread 5).
 - `index.html` + `app.js`: sign in (Google, or an emailed link or 6-digit
   code), make the family, add and edit children, add a tablet with its
   pairing code (or the QR link `#pair/<code>`), rename or remove tablets,
-  each child's play records, download everything, delete the family.
+  each child's report (time played, right and slow sums, levels and worlds
+  done, sessions, latest answers; one section per game), a printable
+  homeschool record for any dates (print or save as PDF), the child's
+  controls (only what the game's manifest offers, such as time limits), the
+  weekly email switch with a preview and a "send it to me now", download
+  everything, delete the family.
   Parents never move a child through the game: no level or world controls.
 - `tablet.html` + `tablet.js`: a test tablet that stands in for the game's
   Family screen until the sync add-on exists: shows a pairing code and QR,
@@ -23,8 +28,8 @@ Plain HTML and JavaScript, no build step (parent app plan v2, thread 5).
 
 Hosted on GitHub Pages from the repository root (`.nojekyll` there), at
 `https://omegasyrus.github.io/Acorn-Backend/web/`. Play records come from
-`GET /v1/children/{child}/games/{game}/records`; skill names from
-`../contract/skills.json`.
+`GET /v1/children/{child}/report` (the same report the weekly email uses) and
+`GET /v1/children/{child}/games/{game}/records` for the latest answers.
 
 Supabase settings it needs (Auth, URL configuration): Site URL
 `https://omegasyrus.github.io/Acorn-Backend/web/` and the same address with

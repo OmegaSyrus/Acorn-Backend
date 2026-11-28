@@ -6,7 +6,26 @@
  "app": "0.28.0",
  "code": 47,
  "cv": 2,
- "settings": [],
+ "settings": [
+  {
+   "key": "daily_minutes",
+   "type": "int",
+   "min": 0,
+   "max": 240,
+   "default": 0,
+   "label": "Daily play limit (minutes)",
+   "help": "0 means no limit. When the time is up the game finishes the current level, then says goodbye until tomorrow.",
+   "since_code": 50
+  },
+  {
+   "key": "bedtime",
+   "type": "time",
+   "default": null,
+   "label": "No play after",
+   "help": "Empty means no bedtime. Uses the tablet's clock.",
+   "since_code": 50
+  }
+ ],
  "skills": [
   "count.to6",
   "numeral.match.to6",
