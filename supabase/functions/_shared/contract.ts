@@ -84,6 +84,13 @@ export const SCHEMAS = {
    "level_id": {
     "type": "integer"
    },
+   "fights": {
+    "enum": [
+     "step_before",
+     "own"
+    ],
+    "description": "The game's Debug fight switch while this line was written: monster fights asked the step before's math, or the level's own. Optional."
+   },
    "where": {
     "enum": [
      "stone",
