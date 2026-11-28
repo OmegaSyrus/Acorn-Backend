@@ -63,5 +63,7 @@ device's snapshot for that child and merges them with `SaveData.merge`:
 | `currencies` | per currency, the highest (no spending yet) |
 | `hero`, `dice`, `difficulty` | from the newest snapshot (`saved_at`) |
 | `ellwynn_intro_seen` | true if any is true |
+| `taught` | per cue id, true if any is true |
+| `book` | per monster id, the union of the Levels (like `marks`) |
 | `run` | this device's own; never taken from another device |
 | anything unknown | from the newest snapshot that has it |
